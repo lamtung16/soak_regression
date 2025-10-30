@@ -50,7 +50,7 @@ def cv_gam_model(X_train, X_test, y_train, y_test):
 
     # Grid search for best alpha
     param_grid = {'lasso__alpha': [0.001 * 2 ** i for i in range(16)]}
-    grid = GridSearchCV(pipeline, param_grid, cv=4, scoring='neg_mean_squared_error')
+    grid = GridSearchCV(pipeline, param_grid, cv=4, scoring='neg_mean_squared_error', n_jobs=-1)
     grid.fit(X_train, y_train)
 
     y_pred = grid.predict(X_test)
