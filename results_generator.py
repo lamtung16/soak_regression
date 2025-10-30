@@ -2,11 +2,10 @@ import pandas as pd
 import numpy as np
 import sys
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler, MinMaxScaler
+from sklearn.preprocessing import PolynomialFeatures, MinMaxScaler, FunctionTransformer
 from sklearn.linear_model import Lasso
-from sklearn.model_selection import GridSearchCV
-from sklearn.pipeline import Pipeline
-from sklearn.model_selection import KFold
+from sklearn.model_selection import GridSearchCV, KFold
+from sklearn.pipeline import Pipeline, FeatureUnion
 
 np.random.seed(123)
 
@@ -14,55 +13,48 @@ np.random.seed(123)
 params_df = pd.read_csv("params.csv")
 dataset = params_df.iloc[int(sys.argv[1])]['dataset']
 
-
 # --- Load dataset ---
 df = pd.read_csv(f"data/{dataset}.csv")
 feature_cols = [c for c in df.columns if c not in ["subset", "y"]]
 
+# Scale features
+feature_scaler = MinMaxScaler()
+df[feature_cols] = feature_scaler.fit_transform(df[feature_cols])
+
+# Scale target
+target_scaler = MinMaxScaler()
+df["y"] = target_scaler.fit_transform(df[["y"]])
 
 # --- Model dictionary ---
 def featureless_model(X_train, X_test, y_train, y_test):
-    # Scale the target
-    y_scaler = MinMaxScaler()
-    y_train_scaled = y_scaler.fit_transform(y_train.reshape(-1, 1)).ravel()
-    y_test_scaled = y_scaler.transform(y_test.reshape(-1, 1)).ravel()
-    
-    # Predict the mean of the scaled training target
-    y_pred_scaled = np.repeat(y_train_scaled.mean(), len(y_test_scaled))
-    
-    # Metrics on scaled target
-    mse_scaled = mean_squared_error(y_test_scaled, y_pred_scaled)
-    mae_scaled = mean_absolute_error(y_test_scaled, y_pred_scaled)
-    
-    return mse_scaled, mae_scaled
+    y_pred = np.repeat(y_train.mean(), len(y_test))
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    return mse, mae
 
 
 def cv_gam_model(X_train, X_test, y_train, y_test):
-    # Scale the target
-    y_scaler = MinMaxScaler()
-    y_train_scaled = y_scaler.fit_transform(y_train.reshape(-1, 1)).ravel()
-    y_test_scaled = y_scaler.transform(y_test.reshape(-1, 1)).ravel()
-
-    # Pipeline for X features
-    pipeline = Pipeline([
+    features = FeatureUnion([
         ('poly', PolynomialFeatures()),
-        ('scaler', StandardScaler()),
-        ('lasso', Lasso(max_iter=10000, tol=0.1))
+        ('exp_poly', Pipeline([
+            ('poly', PolynomialFeatures()),
+            ('exp', FunctionTransformer(np.exp, validate=False))
+        ]))
     ])
 
-    # Grid search for best L1 alpha
-    param_grid = {'lasso__alpha': [0.01, 1, 2, 10]}
-    grid = GridSearchCV(pipeline, param_grid, cv=5, scoring='neg_mean_squared_error')
-    grid.fit(X_train, y_train_scaled)
+    pipeline = Pipeline([
+        ('features', features),
+        ('scaler', MinMaxScaler()),
+        ('lasso', Lasso(max_iter=100000, tol=0.001))
+    ])
 
-    # Predictions (scaled)
-    y_pred_scaled = grid.predict(X_test)
+    # Grid search for best alpha
+    param_grid = {'lasso__alpha': [0.001 * 2 ** i for i in range(16)]}
+    grid = GridSearchCV(pipeline, param_grid, cv=4, scoring='neg_mean_squared_error')
+    grid.fit(X_train, y_train)
 
-    # Metrics on scaled target
-    mse_scaled = mean_squared_error(y_test_scaled, y_pred_scaled)
-    mae_scaled = mean_absolute_error(y_test_scaled, y_pred_scaled)
-    
-    return mse_scaled, mae_scaled
+    y_pred = grid.predict(X_test)
+    return mean_squared_error(y_test, y_pred), mean_absolute_error(y_test, y_pred)
 
 
 model_dict = {
@@ -70,12 +62,13 @@ model_dict = {
     "cv_gam": cv_gam_model
 }
 
-
 # --- record results ---
 results = []
 
 for subset in np.unique(df["subset"]):
     subset_idx = np.where(df["subset"] == subset)[0]
+    if(len(subset_idx) < 10):
+        continue
     kf = KFold(n_splits=5)
     for fold, (train_idx, test_idx) in enumerate(kf.split(subset_idx)):
         test_indices = subset_idx[test_idx]
@@ -92,10 +85,11 @@ for subset in np.unique(df["subset"]):
         for category, train_indices in train_dict.items():
             for model in ["featureless", "cv_gam"]:
                 mse, mae = model_dict[model](
-                    X_train = df[feature_cols].values[train_indices],
-                    X_test  = df[feature_cols].values[test_indices],
-                    y_train = df["y"].values[train_indices],
-                    y_test  = df["y"].values[test_indices])
+                    X_train=df[feature_cols].values[train_indices],
+                    X_test=df[feature_cols].values[test_indices],
+                    y_train=df["y"].values[train_indices],
+                    y_test=df["y"].values[test_indices]
+                )
                 
                 results.append({
                     "subset": subset,
