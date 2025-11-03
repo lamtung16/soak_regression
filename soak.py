@@ -7,19 +7,50 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import KFold
 from sklearn.pipeline import Pipeline
 
+
+def featureless_model(X_train, X_test, y_train, y_test):
+    y_pred = np.repeat(y_train.mean(), len(y_test))
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    return mse, mae
+
+
+def linear_model(X_train, X_test, y_train, y_test):
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    return mse, mae
+
+
+def gam_model(X_train, X_test, y_train, y_test):
+    pipeline = Pipeline([
+        ('poly', PolynomialFeatures()),
+        ('scaler', StandardScaler()),
+        ('lasso', LassoCV(cv=4, n_jobs=-1, tol=0.1, max_iter=10000, selection='random'))
+    ])
+    pipeline.fit(X_train, y_train)
+    y_pred = pipeline.predict(X_test)
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    return mse, mae
+
+
+# Available models
+available_models = {
+    "featureless": featureless_model,
+    "linear": linear_model,
+    "gam": gam_model
+}
+
+
 class soak:
     def __init__(self, df, subset_col="subset", target_col="y", n_folds=5, models=None):
         self.df = df.copy()
         self.subset_col = subset_col
         self.target_col = target_col
         self.n_folds = n_folds
-        
-        # Available models
-        available_models = {
-            "featureless": self.featureless_model,
-            "linear": self.linear_model,
-            "gam": self.gam_model
-        }
         
         # If user didn't provide models, use all by default
         if models is None:
@@ -34,43 +65,10 @@ class soak:
         self._scale_features_and_target()
 
     def _scale_features_and_target(self):
-        # Scale features
         feature_scaler = StandardScaler()
-        self.df[self.feature_cols] = feature_scaler.fit_transform(self.df[self.feature_cols])
-
-        # Scale target
         target_scaler = StandardScaler()
+        self.df[self.feature_cols] = feature_scaler.fit_transform(self.df[self.feature_cols])
         self.df[self.target_col] = target_scaler.fit_transform(self.df[[self.target_col]])
-
-    # --- Model definitions ---
-    @staticmethod
-    def featureless_model(X_train, X_test, y_train, y_test):
-        y_pred = np.repeat(y_train.mean(), len(y_test))
-        mse = mean_squared_error(y_test, y_pred)
-        mae = mean_absolute_error(y_test, y_pred)
-        return mse, mae
-    
-    @staticmethod
-    def linear_model(X_train, X_test, y_train, y_test):
-        model = LinearRegression()
-        model.fit(X_train, y_train)
-        y_pred = model.predict(X_test)
-        mse = mean_squared_error(y_test, y_pred)
-        mae = mean_absolute_error(y_test, y_pred)
-        return mse, mae
-    
-    @staticmethod
-    def gam_model(X_train, X_test, y_train, y_test):
-        pipeline = Pipeline([
-            ('poly', PolynomialFeatures()),
-            ('scaler', StandardScaler()),
-            ('lasso', LassoCV(cv=4, n_jobs=-1, max_iter=50000, tol=0.01))
-        ])
-        pipeline.fit(X_train, y_train)
-        y_pred = pipeline.predict(X_test)
-        mse = mean_squared_error(y_test, y_pred)
-        mae = mean_absolute_error(y_test, y_pred)
-        return mse, mae
 
     # --- Analyze ---
     def analyze(self, subset_names):
