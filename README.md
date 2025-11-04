@@ -4,7 +4,7 @@ SOAK is designed to estimate the **similarity of patterns** found across differe
 ## Pseudocode
 ```
 FOR each subset of the dataset:
-    Split the subset into folds (for example, 5)
+    Split the subset into folds (e.g, 5)
 
     FOR each test fold:
         Define train sets:
@@ -12,45 +12,32 @@ FOR each subset of the dataset:
             - "other": data from other subsets
             - "all": combination of "same" and "other"
 
-        FOR each train set ("same", "other", "all"):
-            FOR each model (featureless and another model):
+        FOR each train set in ("same", "other", "all"):
+            FOR each model (e.g, featureless, linear, tree, ...):
                 The model is trained on the train set and evaluated on the test fold
-                Record evaluation metrics (MSE, MAE) along with subset, category (S, O, A), fold, and model
+                Record subset, train set category, fold, model, evaluation metrics (e.g, MSE, MAE)
 ```
 
 ## Usage
 
 ### 0. Folder Structure
-- **`data`**: Contains all datasets in CSV format.  
+- **`data`**: Contains all datasets in CSV format. Feature columns has to start with 'X_'
 - **`results`**: Contains CSV files of computed errors for each dataset.  
 - **`figures`**: Contains figures of errors for each dataset.  
 - **`notebooks`**: Jupyter notebooks for testing.
 
 
 ### 1. Generate Dataset Parameters
-Use `params_csv_generator.py` to create the CSV file containing datasets:
-
-```bash 
-python params_csv_generator.py
-```
+Create params.csv with columns: `dataset`,`subset_col`,`target_col`
 
 ### 2. Generate Results
-Use `results_generator.py` to generate results for a specific dataset. Replace `i` with the row number from `params.csv`:
+Use `results_generator.py` to generate results and figures for a specific row in `params.csv`:
 ```bash
 python results_generator.py i
 ```
 
-### 3. Generate Figures
-Use `figs_generator.py` to generate figures for a specific dataset. Replace `i` with the row number from `params.csv`:
-```bash
-python figs_generator.py i
-```
-
-### Notes
-Row numbers in `params.csv` start from 0.
-
 ## Figures
-![alt text](figures/test.png)
+![alt text](figures/synthetic/subset/sum.png)
 
 ## TODO
 - Find more regression datasets:
