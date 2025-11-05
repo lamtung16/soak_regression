@@ -1,0 +1,3 @@
+for x in {0..100}; do
+    python results_generator.py "$x"
+done

@@ -10,7 +10,7 @@ subset_col = params_df.iloc[int(sys.argv[1])]['subset_col']
 target_col = params_df.iloc[int(sys.argv[1])]['target_col']
 
 # --- Load dataset ---
-df = pd.read_csv(f"data/{dataset}.csv")
+df = pd.read_csv(f"data/{dataset}.csv.xz", compression="xz")
 
 # --- Initialize soak object ---
 soak_obj = soak(df, subset_col, target_col)
