@@ -1,5 +1,5 @@
 import numpy as np
-import pandas as pd
+import polars as pl
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import RidgeCV, LinearRegression
@@ -7,70 +7,80 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import KFold
 from sklearn.pipeline import Pipeline
 
-
-def featureless_model(X_train, X_test, y_train, y_test):
-    y_pred = np.repeat(y_train.mean(), len(y_test))
-    return mean_squared_error(y_test, y_pred), mean_absolute_error(y_test, y_pred)
-
-
-def linear_model(X_train, X_test, y_train, y_test):
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    return mean_squared_error(y_test, y_pred), mean_absolute_error(y_test, y_pred)
-
-
-def gam_model(X_train, X_test, y_train, y_test):
-    pipeline = Pipeline([
-        ('poly', PolynomialFeatures()),
-        ('scaler', StandardScaler()),
-        ('ridge', RidgeCV(alphas=np.logspace(-2, 2, 20), cv=4))
-    ])
-    pipeline.fit(X_train, y_train)
-    y_pred = pipeline.predict(X_test)
-    return mean_squared_error(y_test, y_pred), mean_absolute_error(y_test, y_pred)
-
-
-# Available models
-available_models = {
-    "featureless": featureless_model,
-    "linear": linear_model,
-    "gam": gam_model
-}
-
-
 class soak:
     def __init__(self, df, subset_col, target_col, n_folds=5, models=None):
-        self.df = df.copy()
+        self.df = df
         self.subset_col = subset_col
         self.target_col = target_col
         self.n_folds = n_folds
-        
-        # If user didn't provide models, use all by default
+
+        # Identify feature columns
+        self.feature_cols = [c for c in df.columns if c.startswith("X_")]
+
+        # --- Store scalers ---
+        self.feature_scaler = StandardScaler()
+        self.target_scaler = StandardScaler()
+
+        # Fit scalers only
+        self.feature_scaler.fit(df.select(self.feature_cols).to_numpy())
+        self.target_scaler.fit(df.select(self.target_col).to_numpy().reshape(-1, 1))
+
+        # --- Model selection ---
+        all_models = {
+            "featureless": self._featureless_model,
+            "linear": self._linear_model,
+            "gam": self._gam_model,
+        }
         if models is None:
-            models = list(available_models.keys())
-        
-        # Keep only valid models
-        self.model_dict = {name: available_models[name] for name in models if name in available_models}
-        
-        self.feature_cols = [c for c in self.df.columns if c.startswith('X_')]
+            models = list(all_models.keys())
+        self.model_dict = {name: all_models[name] for name in models if name in all_models}
+
         self.results_df = None
-        
-        self._scale_features_and_target()
 
-    def _scale_features_and_target(self):
-        feature_scaler = StandardScaler()
-        target_scaler = StandardScaler()
-        self.df[self.feature_cols] = feature_scaler.fit_transform(self.df[self.feature_cols])
-        self.df[self.target_col] = target_scaler.fit_transform(self.df[[self.target_col]])
+    # --- Utility to get scaled NumPy arrays ---
+    def _get(self, cols, scale=True):
+        arr = self.df.select(cols).to_numpy()
+        if scale:
+            if cols == [self.target_col]:
+                arr = self.target_scaler.transform(arr.reshape(-1, 1)).flatten()
+            else:
+                arr = self.feature_scaler.transform(arr)
+        return arr
 
-    # --- Analyze ---
+    # --- Model methods ---
+    def _featureless_model(self, train_idx, test_idx):
+        mse = mean_squared_error(self._get([self.target_col], scale=True)[test_idx], np.repeat(self._get([self.target_col], scale=True)[train_idx].mean(), len(test_idx)))
+        mae = mean_absolute_error(self._get([self.target_col], scale=True)[test_idx], np.repeat(self._get([self.target_col], scale=True)[train_idx].mean(), len(test_idx)))
+        return mse, mae 
+
+    def _linear_model(self, train_idx, test_idx):
+        model = LinearRegression()
+        model.fit(self._get(self.feature_cols, scale=True)[train_idx], self._get([self.target_col], scale=True)[train_idx])
+        mse = mean_squared_error(self._get([self.target_col], scale=True)[test_idx], model.predict(self._get(self.feature_cols, scale=True)[test_idx]))
+        mae = mean_absolute_error(self._get([self.target_col], scale=True)[test_idx], model.predict(self._get(self.feature_cols, scale=True)[test_idx]))
+        return mse, mae 
+
+    def _gam_model(self, train_idx, test_idx):
+        pipeline = Pipeline([
+            ('poly', PolynomialFeatures()),
+            ('scaler', StandardScaler()),
+            ('ridge', RidgeCV(alphas=np.logspace(-2, 2, 20), cv=4))
+        ])
+        pipeline.fit(self._get(self.feature_cols, scale=True)[train_idx], self._get([self.target_col], scale=True)[train_idx])
+        mse = mean_squared_error(self._get([self.target_col], scale=True)[test_idx], pipeline.predict(self._get(self.feature_cols, scale=True)[test_idx]))
+        mae = mean_absolute_error(self._get([self.target_col], scale=True)[test_idx], pipeline.predict(self._get(self.feature_cols, scale=True)[test_idx]))
+        return mse, mae
+
+    # --- Main analysis ---
     def analyze(self, subset_names):
-        results = []
+        # Use a list to accumulate small Polars DataFrames
+        results_chunks = []
+
+        subset_col_np = self._get([self.subset_col], scale=False).flatten()
 
         for subset_name in subset_names:
-            subset_idx = np.where(self.df[self.subset_col] == subset_name)[0]
-            other_indices = np.where(self.df[self.subset_col] != subset_name)[0]
+            subset_idx = np.where(subset_col_np == subset_name)[0]
+            other_indices = np.where(subset_col_np != subset_name)[0]
             kf = KFold(n_splits=self.n_folds)
 
             for fold, (train_idx, test_idx) in enumerate(kf.split(subset_idx)):
@@ -84,15 +94,12 @@ class soak:
                     "other": other_indices,
                 }
 
+                # Compute results for each model/category
+                rows = []
                 for category, train_indices in train_dict.items():
                     for model_name, model_func in self.model_dict.items():
-                        mse, mae = model_func(
-                            X_train=self.df[self.feature_cols].values[train_indices],
-                            X_test=self.df[self.feature_cols].values[test_indices],
-                            y_train=self.df[self.target_col].values[train_indices],
-                            y_test=self.df[self.target_col].values[test_indices]
-                        )
-                        results.append({
+                        mse, mae = model_func(train_indices, test_indices)
+                        rows.append({
                             "subset": subset_name,
                             "category": category,
                             "test_fold": fold + 1,
@@ -100,29 +107,38 @@ class soak:
                             "mse": mse,
                             "mae": mae
                         })
-        self.results_df = pd.DataFrame(results)
-    
+                        print(rows)
+                # Append small chunk to the list
+                results_chunks.append(pl.DataFrame(rows))
 
+        # Concatenate all chunks once at the end
+        self.results_df = pl.concat(results_chunks, rechunk=True)
+        
     def plot_results(self):
         if self.results_df is None:
             raise ValueError("No results found. Run analyze() first.")
 
         subset_counts = self.df[self.subset_col].value_counts().to_dict()
-        df = self.results_df.copy()
-        df['log_mse'] = np.log10(df['mse'])
-        df['log_mae'] = np.log10(df['mae'])
+        df = self.results_df
+        df = df.with_columns([
+            (pl.col("mse").log10()).alias("log_mse"),
+            (pl.col("mae").log10()).alias("log_mae")
+        ])
 
         subsets = df['subset'].unique()
         categories = df['category'].unique()
         models = df['model'].unique()
 
         # Aggregate by subset, category, model
-        df_mean = df.groupby(['subset', 'category', 'model'], sort=False).agg(
-            mse_mean=('log_mse', 'mean'),
-            mse_sd=('log_mse', 'std'),
-            mae_mean=('log_mae', 'mean'),
-            mae_sd=('log_mae', 'std')
-        ).reset_index()
+        df_mean = (
+            df.group_by(['subset', 'category', 'model'], maintain_order=True)
+            .agg([
+                pl.col("log_mse").mean().alias("mse_mean"),
+                pl.col("log_mse").std().alias("mse_sd"),
+                pl.col("log_mae").mean().alias("mae_mean"),
+                pl.col("log_mae").std().alias("mae_sd")
+            ])
+        )
 
         # Assign colors for each model dynamically
         model_colors = {model: plt.cm.tab10(i) for i, model in enumerate(models)}
@@ -132,7 +148,7 @@ class soak:
         for subset in subsets:
 
             # Determine shared x-axis limits
-            df_mean_subset = df_mean[df_mean['subset'] == subset]
+            df_mean_subset = df_mean.filter(pl.col("subset") == subset)
             mse_min = df_mean_subset['mse_mean'].min() - 1.8*df_mean_subset['mse_sd'].max()
             mse_max = df_mean_subset['mse_mean'].max() + 1.8*df_mean_subset['mse_sd'].max()
             mae_min = df_mean_subset['mae_mean'].min() - 1.8*df_mean_subset['mae_sd'].max()
@@ -149,8 +165,8 @@ class soak:
                     ax_err = axes[i, j]
                     ax_err.grid(alpha=0.1)
 
-                    data_mean = df_mean[(df_mean['category'] == category) & (df_mean['subset'] == subset)]
-                    data = df[(df['category'] == category) & (df['subset'] == subset)]
+                    data_mean = df_mean.filter((pl.col("category") == category) & (pl.col("subset") == subset))
+                    data = df.filter((pl.col("category") == category) & (pl.col("subset") == subset))
 
                     model_names = data['model'].unique()
                     model_to_y = {m: yk for yk, m in enumerate(model_names)}
@@ -180,30 +196,30 @@ class soak:
 
                     # Columns: 0 = log(MSE) mean ± SD, 1 = log(MSE) all points, 2 = log(MAE) mean ± SD, 3 = log(MAE) all points
                     if j == 0:
-                        for k, row in enumerate(data_mean.itertuples()):
-                            color = model_colors[row.model]
+                        for k, row in enumerate(data_mean.to_dicts()):
+                            color = model_colors[row["model"]]
                             ax_err.errorbar(
-                                row.mse_mean, k, xerr=row.mse_sd, fmt='o',
+                                row["mse_mean"], k, xerr=row["mse_sd"], fmt='o',
                                 color=color, markerfacecolor=color, markeredgecolor=color,
                                 capsize=2, markersize=5
                             )
                     elif j == 1:
                         for model in model_names:
-                            vals = data.loc[data['model'] == model, 'log_mse']
+                            vals = data.filter(pl.col("model") == model).select("log_mse").to_numpy().flatten()
                             y_pos = model_to_y[model]
                             color = model_colors[model]
                             ax_err.scatter(vals, np.ones_like(vals) * y_pos, facecolor=color, edgecolor=color, s=20)
                     elif j == 2:
-                        for k, row in enumerate(data_mean.itertuples()):
-                            color = model_colors[row.model]
+                        for k, row in enumerate(data_mean.to_dicts()):
+                            color = model_colors[row["model"]]
                             ax_err.errorbar(
-                                row.mae_mean, k, xerr=row.mae_sd, fmt='o',
+                                row["mae_mean"], k, xerr=row["mae_sd"], fmt='o',
                                 color=color, markerfacecolor=color, markeredgecolor=color,
                                 capsize=2, markersize=5
                             )
                     elif j == 3:
                         for model in model_names:
-                            vals = data.loc[data['model'] == model, 'log_mae']
+                            vals = data.filter(pl.col("model") == model).select("log_mae").to_numpy().flatten()
                             y_pos = model_to_y[model]
                             color = model_colors[model]
                             ax_err.scatter(vals, np.ones_like(vals) * y_pos, facecolor=color, edgecolor=color, s=20)
