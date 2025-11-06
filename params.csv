@@ -1,6 +1,15 @@
 dataset,subset_col,target_col
 synthetic,subset,y
 fish_market,Species,Weight
+CPMP_2015_regression,algorithm,runtime
+CPMP_2015_regression,runstatus,runtime
+avocado_sales,type,AveragePrice
+avocado_sales,year,AveragePrice
+WorkersCompensation,Gender,UltimateIncurredClaimCost
+WorkersCompensation,MaritalStatus,UltimateIncurredClaimCost
+WorkersCompensation,PartTimeFullTime,UltimateIncurredClaimCost
+WorkersCompensation,DependentChildren,UltimateIncurredClaimCost
+WorkersCompensation,DependentsOther,UltimateIncurredClaimCost
 qsip_pc2_all,experiment,growth_per_day
 qsip_pc2_all,copies_16s,growth_per_day
 qsip_pc2_all,details,growth_per_day

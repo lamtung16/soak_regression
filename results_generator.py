@@ -14,10 +14,10 @@ target_col = params_df[idx, "target_col"]
 # --- Load dataset efficiently from .xz ---
 file_path = f"data/{dataset}.csv.xz"
 with lzma.open(file_path, mode="rb") as f:
-    df = pl.read_csv(f, encoding="latin1")
+    df = pl.read_csv(f, encoding="latin1", infer_schema_length=10000)
 
 # --- Initialize soak object ---
-soak_obj = soak(df, subset_col, target_col, models=['featureless', 'linear'])
+soak_obj = soak(df, subset_col, target_col)
 
 # --- Analyze all subsets ---
 subset_list = sorted(df[subset_col].unique().to_list())

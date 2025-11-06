@@ -1,6 +1,8 @@
 import numpy as np
 import polars as pl
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+import matplotlib.cm as cm
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
 from sklearn.linear_model import RidgeCV, LinearRegression
 from sklearn.metrics import mean_squared_error, mean_absolute_error
@@ -107,7 +109,7 @@ class soak:
                             "mse": mse,
                             "mae": mae
                         })
-                        print(rows)
+                        
                 # Append small chunk to the list
                 results_chunks.append(pl.DataFrame(rows))
 
@@ -118,18 +120,17 @@ class soak:
         if self.results_df is None:
             raise ValueError("No results found. Run analyze() first.")
 
-        subset_counts = self.df[self.subset_col].value_counts().to_dict()
-        df = self.results_df
-        df = df.with_columns([
-            (pl.col("mse").log10()).alias("log_mse"),
-            (pl.col("mae").log10()).alias("log_mae")
-        ])
+        # Compute log metrics
+        df = self.results_df.with_columns([
+            pl.col("mse").log10().alias("log_mse"),
+            pl.col("mae").log10().alias("log_mae")
+        ]).sort("model")
 
         subsets = df['subset'].unique()
-        categories = df['category'].unique()
-        models = df['model'].unique()
+        categories = ['all', 'same', 'other']
+        models = sorted(df['model'].unique())
 
-        # Aggregate by subset, category, model
+        # Aggregate mean and std
         df_mean = (
             df.group_by(['subset', 'category', 'model'], maintain_order=True)
             .agg([
@@ -140,99 +141,72 @@ class soak:
             ])
         )
 
-        # Assign colors for each model dynamically
-        model_colors = {model: plt.cm.tab10(i) for i, model in enumerate(models)}
+        # Assign colors
+        cmap = cm.get_cmap('tab10')
+        model_colors = {model: cmap(i % 10) for i, model in enumerate(models)}
 
         fig_dict = {}
 
         for subset in subsets:
-
-            # Determine shared x-axis limits
+            df_subset = df.filter(pl.col("subset") == subset)
             df_mean_subset = df_mean.filter(pl.col("subset") == subset)
-            mse_min = df_mean_subset['mse_mean'].min() - 1.8*df_mean_subset['mse_sd'].max()
-            mse_max = df_mean_subset['mse_mean'].max() + 1.8*df_mean_subset['mse_sd'].max()
-            mae_min = df_mean_subset['mae_mean'].min() - 1.8*df_mean_subset['mae_sd'].max()
-            mae_max = df_mean_subset['mae_mean'].max() + 1.8*df_mean_subset['mae_sd'].max()
+            n_obs = self.df.filter(pl.col(self.subset_col) == subset).height
 
-            n_obs = subset_counts.get(subset, 0)
             fig, axes = plt.subplots(len(categories), 4, figsize=(16, 1.1 * len(categories)), sharex=False)
+            axes = np.array([axes]) if len(categories) == 1 else axes
 
-            if len(categories) == 1:
-                axes = np.array([axes])
+            mse_min = df_mean_subset['mse_mean'].min() - 2 * df_mean_subset['mse_sd'].max()
+            mse_max = df_mean_subset['mse_mean'].max() + 2 * df_mean_subset['mse_sd'].max()
+            mae_min = df_mean_subset['mae_mean'].min() - 2 * df_mean_subset['mae_sd'].max()
+            mae_max = df_mean_subset['mae_mean'].max() + 2 * df_mean_subset['mae_sd'].max()
 
             for i, category in enumerate(categories):
-                for j in range(4):
-                    ax_err = axes[i, j]
-                    ax_err.grid(alpha=0.1)
+                data = df_subset.filter(pl.col("category") == category)
+                data_mean = df_mean_subset.filter(pl.col("category") == category)
+                model_to_y = {m: y for y, m in enumerate(sorted(data['model'].unique()))}
 
-                    data_mean = df_mean.filter((pl.col("category") == category) & (pl.col("subset") == subset))
-                    data = df.filter((pl.col("category") == category) & (pl.col("subset") == subset))
+                for j, metric in enumerate(['mse', 'mse', 'mae', 'mae']):
+                    ax = axes[i, j]
+                    ax.grid(alpha=0.1)
+                    ax.set_ylim(-0.5, len(models) - 0.5)
+                    ax.set_yticklabels([])
 
-                    model_names = data['model'].unique()
-                    model_to_y = {m: yk for yk, m in enumerate(model_names)}
-
-                    ax_err.set_ylim(-0.5, len(models) - 0.5)
-
-                    # Set x-axis label based on column
-                    if i == len(categories) - 1:
-                        if j in [0, 1]:
-                            ax_err.set_xlabel('log(MSE)')
-                        elif j in [2, 3]:
-                            ax_err.set_xlabel('log(MAE)')
-
-                    # Only show category on first column
-                    if j == 0:
-                        ax_err.set_ylabel(category, rotation=0, labelpad=15, va='center', fontweight='bold')
+                    # Set global x-limits for MSE/MAE
+                    if metric == 'mse':
+                        ax.set_xlim(mse_min, mse_max)
                     else:
-                        ax_err.set_ylabel('')
+                        ax.set_xlim(mae_min, mae_max)
 
-                    ax_err.set_yticklabels([])
-
-                    # Set shared x-limits for MSE and MAE
-                    if j in [0, 1]:
-                        ax_err.set_xlim(mse_min, mse_max)
-                    elif j in [2, 3]:
-                        ax_err.set_xlim(mae_min, mae_max)
-
-                    # Columns: 0 = log(MSE) mean ± SD, 1 = log(MSE) all points, 2 = log(MAE) mean ± SD, 3 = log(MAE) all points
                     if j == 0:
-                        for k, row in enumerate(data_mean.to_dicts()):
-                            color = model_colors[row["model"]]
-                            ax_err.errorbar(
-                                row["mse_mean"], k, xerr=row["mse_sd"], fmt='o',
-                                color=color, markerfacecolor=color, markeredgecolor=color,
-                                capsize=2, markersize=5
-                            )
-                    elif j == 1:
-                        for model in model_names:
-                            vals = data.filter(pl.col("model") == model).select("log_mse").to_numpy().flatten()
-                            y_pos = model_to_y[model]
-                            color = model_colors[model]
-                            ax_err.scatter(vals, np.ones_like(vals) * y_pos, facecolor=color, edgecolor=color, s=20)
-                    elif j == 2:
-                        for k, row in enumerate(data_mean.to_dicts()):
-                            color = model_colors[row["model"]]
-                            ax_err.errorbar(
-                                row["mae_mean"], k, xerr=row["mae_sd"], fmt='o',
-                                color=color, markerfacecolor=color, markeredgecolor=color,
-                                capsize=2, markersize=5
-                            )
-                    elif j == 3:
-                        for model in model_names:
-                            vals = data.filter(pl.col("model") == model).select("log_mae").to_numpy().flatten()
-                            y_pos = model_to_y[model]
-                            color = model_colors[model]
-                            ax_err.scatter(vals, np.ones_like(vals) * y_pos, facecolor=color, edgecolor=color, s=20)
+                        ax.set_ylabel(category, rotation=0, labelpad=15, va='center', fontweight='bold')
+                    else:
+                        ax.set_ylabel('')
 
-            # Global legend and title
-            handles = [
-                plt.Line2D([], [], marker='o', color=color, markerfacecolor=color, linestyle='', markersize=5, label=m)
-                for m, color in reversed(list(model_colors.items()))
-            ]
+                    if i == len(categories) - 1:
+                        if j % 2 == 0:
+                            ax.set_xlabel(f'log({metric.upper()})')
+                        else:
+                            ax.set_xlabel(f'log({metric.upper()})')
+
+                    # Plot mean ± sd or individual points
+                    if j % 2 == 0:  # mean ± sd
+                        for k, row in enumerate(data_mean.to_dicts()):
+                            color = model_colors[row["model"]]
+                            ax.errorbar(row[f"{metric}_mean"], k, xerr=row[f"{metric}_sd"],
+                                        fmt='o', color=color, capsize=2, markersize=5)
+                    else:  # individual points
+                        for model in model_to_y:
+                            vals = data.filter(pl.col("model") == model).select(f"log_{metric}").to_numpy().flatten()
+                            ax.scatter(vals, np.ones_like(vals) * model_to_y[model],
+                                    facecolor=model_colors[model], edgecolor=model_colors[model], s=20)
+
+            # Legend and title
+            handles = [Line2D([], [], marker='o', color=color, markerfacecolor=color,
+                            linestyle='', markersize=5, label=m)
+                    for m, color in reversed(list(model_colors.items()))]
             fig.legend(handles=handles, loc='upper right', fontsize=8)
-            fig.suptitle(f'test subset: {subset} (n = {n_obs})', fontsize=11, fontweight='bold')
+            fig.suptitle(f'Subset: {subset} (n={n_obs})', fontsize=11, fontweight='bold')
             plt.tight_layout()
-
             fig_dict[subset] = fig
 
         return fig_dict
