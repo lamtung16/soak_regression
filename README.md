@@ -19,22 +19,89 @@ FOR each subset of the dataset:
 ```
 
 ## Usage
+### High level
+```python
+import polars as pl
+import lzma
+from soak import SOAK
 
-### 0. Folder Structure
+# --- Load dataset from .xz ---
+file_path = f"data/'WorkersCompensation'.csv.xz"
+with lzma.open(file_path, mode="rb") as f:
+    df = pl.read_csv(f, encoding="latin1", infer_schema_length=10000)
+
+# --- Initialize soak object ---
+soak_obj = SOAK()
+
+# --- Analyze subset ---
+soak_obj.subset_analyze(df, subset_col='Gender', target_col='UltimateIncurredClaimCost', downsample_majority=True, seed=321)
+
+# --- Generate figures ---
+figs = soak_obj.plot_results()
+```
+### Low level
+```python
+import numpy as np
+from soak import SOAK
+
+# --- synthetic data ---
+X = np.arange(8).reshape(-1, 1)
+y = X.ravel()
+subset_vec = np.array(['even' if x % 2 == 0 else 'odd' for x in X.ravel()])
+
+# --- Initialize soak object ---
+soak_obj = SOAK(n_splits=2)
+
+for subset_val, category, fold_id, X_train, X_test, y_train, y_test in soak_obj.split(X, y, subset_vec):
+    print(f"subset: {subset_val:6s} --- category: {category:6s} --- fold {fold_id + 1}")
+    print("X_train:", X_train.ravel())
+    print("X_test: ", X_test.ravel())
+    print("-"*50)
+```
+```
+_______________________________________________________
+ subset: even || category: same   || fold 1
+ X_test:[0 6], X_train:[2 4]
+____________________________________________________________
+ subset: even || category: other  || fold 1
+ X_test:[0 6], X_train:[1 3 5 7]
+____________________________________________________________
+ subset: even || category: all    || fold 1
+ X_test:[0 6], X_train:[2 4 1 3 5 7]
+____________________________________________________________
+ subset: even || category: same   || fold 2
+ X_test:[2 4], X_train:[0 6]
+____________________________________________________________
+ subset: even || category: other  || fold 2
+ X_test:[2 4], X_train:[1 3 5 7]
+____________________________________________________________
+ subset: even || category: all    || fold 2
+ X_test:[2 4], X_train:[0 6 1 3 5 7]
+____________________________________________________________
+ subset: odd || category: same   || fold 1
+ X_test:[1 7], X_train:[3 5]
+____________________________________________________________
+ subset: odd || category: other  || fold 1
+ X_test:[1 7], X_train:[0 2 4 6]
+____________________________________________________________
+ subset: odd || category: all    || fold 1
+ X_test:[1 7], X_train:[3 5 0 2 4 6]
+____________________________________________________________
+ subset: odd || category: same   || fold 2
+ X_test:[3 5], X_train:[1 7]
+____________________________________________________________
+ subset: odd || category: other  || fold 2
+ X_test:[3 5], X_train:[0 2 4 6]
+____________________________________________________________
+ subset: odd || category: all    || fold 2
+ X_test:[3 5], X_train:[1 7 0 2 4 6]
+```
+
+## Folder Structure
 - **`data`**: Contains all datasets in CSV format. Feature columns has to start with 'X_'
 - **`results`**: Contains CSV files of computed errors for each dataset.  
 - **`figures`**: Contains figures of errors for each dataset.  
 - **`notebooks`**: Jupyter notebooks for testing.
-
-
-### 1. Generate Dataset Parameters
-Create params.csv with columns: `dataset`,`subset_col`,`target_col`
-
-### 2. Generate Results
-Use `results_generator.py` to generate results and figures for a specific row in `params.csv`:
-```bash
-python results_generator.py i
-```
 
 ## Figures
 ![alt text](figures/synthetic/subset/sum.png)

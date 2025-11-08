@@ -2,7 +2,7 @@ import polars as pl
 import lzma
 import sys
 import os
-from soak import soak
+from soak import SOAK
 
 # --- Read dataset name from params.csv ---
 params_df = pl.read_csv("params.csv")
@@ -17,11 +17,10 @@ with lzma.open(file_path, mode="rb") as f:
     df = pl.read_csv(f, encoding="latin1", infer_schema_length=10000)
 
 # --- Initialize soak object ---
-soak_obj = soak(df, subset_col, target_col)
+soak_obj = SOAK()
 
 # --- Analyze all subsets ---
-subset_list = sorted(df[subset_col].unique().to_list())
-soak_obj.analyze(subset_list)
+soak_obj.subset_analyze(df, subset_col, target_col, downsample_majority=True, seed=123)
 
 # --- Save CV results ---
 results_path = f"results/{dataset}"
