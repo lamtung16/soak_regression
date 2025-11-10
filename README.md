@@ -42,7 +42,7 @@ figs = soak_obj.plot_results()
 ### Low level
 ```python
 import numpy as np
-from soak import SOAK
+from soak_low_level import SOAK
 
 # --- synthetic data ---
 X = np.arange(8).reshape(-1, 1)
@@ -59,42 +59,54 @@ for subset_val, category, fold_id, X_train, X_test, y_train, y_test in soak_obj.
     print("-"*50)
 ```
 ```
-_______________________________________________________
- subset: even || category: same   || fold 1
- X_test:[0 6], X_train:[2 4]
-____________________________________________________________
- subset: even || category: other  || fold 1
- X_test:[0 6], X_train:[1 3 5 7]
-____________________________________________________________
- subset: even || category: all    || fold 1
- X_test:[0 6], X_train:[2 4 1 3 5 7]
-____________________________________________________________
- subset: even || category: same   || fold 2
- X_test:[2 4], X_train:[0 6]
-____________________________________________________________
- subset: even || category: other  || fold 2
- X_test:[2 4], X_train:[1 3 5 7]
-____________________________________________________________
- subset: even || category: all    || fold 2
- X_test:[2 4], X_train:[0 6 1 3 5 7]
-____________________________________________________________
- subset: odd || category: same   || fold 1
- X_test:[1 7], X_train:[3 5]
-____________________________________________________________
- subset: odd || category: other  || fold 1
- X_test:[1 7], X_train:[0 2 4 6]
-____________________________________________________________
- subset: odd || category: all    || fold 1
- X_test:[1 7], X_train:[3 5 0 2 4 6]
-____________________________________________________________
- subset: odd || category: same   || fold 2
- X_test:[3 5], X_train:[1 7]
-____________________________________________________________
- subset: odd || category: other  || fold 2
- X_test:[3 5], X_train:[0 2 4 6]
-____________________________________________________________
- subset: odd || category: all    || fold 2
- X_test:[3 5], X_train:[1 7 0 2 4 6]
+subset: even   --- category: same  
+X_train: [2 4]
+X_test:  [0 6]
+--------------------------------------------------
+subset: even   --- category: other 
+X_train: [1 3 5 7]
+X_test:  [0 6]
+--------------------------------------------------
+subset: even   --- category: all   
+X_train: [2 4 1 3 5 7]
+X_test:  [0 6]
+--------------------------------------------------
+subset: even   --- category: same  
+X_train: [0 6]
+X_test:  [2 4]
+--------------------------------------------------
+subset: even   --- category: other 
+X_train: [1 3 5 7]
+X_test:  [2 4]
+--------------------------------------------------
+subset: even   --- category: all   
+X_train: [0 6 1 3 5 7]
+X_test:  [2 4]
+--------------------------------------------------
+subset: odd    --- category: same  
+X_train: [3 5]
+X_test:  [1 7]
+--------------------------------------------------
+subset: odd    --- category: other 
+X_train: [0 2 4 6]
+X_test:  [1 7]
+--------------------------------------------------
+subset: odd    --- category: all   
+X_train: [3 5 0 2 4 6]
+X_test:  [1 7]
+--------------------------------------------------
+subset: odd    --- category: same  
+X_train: [1 7]
+X_test:  [3 5]
+--------------------------------------------------
+subset: odd    --- category: other 
+X_train: [0 2 4 6]
+X_test:  [3 5]
+--------------------------------------------------
+subset: odd    --- category: all   
+X_train: [1 7 0 2 4 6]
+X_test:  [3 5]
+--------------------------------------------------
 ```
 
 ## Folder Structure

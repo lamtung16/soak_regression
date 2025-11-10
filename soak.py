@@ -114,27 +114,6 @@ class SOAK:
 
         self.results_df = pl.DataFrame(rows)
 
-    # --- SOAK split ---
-    def split(self, X, y, subset_vec):
-        results = []
-        for subset_val in np.unique(subset_vec):
-            same_idx = np.where(subset_vec == subset_val)[0]
-            other_idx = np.where(subset_vec != subset_val)[0]
-
-            for fold_id, (train_idx, test_idx) in enumerate(KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed).split(same_idx)):
-                test_fold_idx = same_idx[test_idx]
-                X_train_same, y_train_same = X[same_idx[train_idx]], y[same_idx[train_idx]]
-                X_train_other, y_train_other = X[other_idx], y[other_idx]
-
-                for category, (X_train, y_train) in {
-                    'same': (X_train_same, y_train_same),
-                    'other': (X_train_other, y_train_other),
-                    'all': (np.vstack([X_train_same, X_train_other]), np.concatenate([y_train_same, y_train_other]))
-                }.items():
-                    results.append([subset_val, category, fold_id, X_train, X[test_fold_idx], y_train, y[test_fold_idx]])
-        return results
-    
-
     def plot_results(self):
         if self.results_df is None:
             raise ValueError("No results found. Run analyze() first.")
