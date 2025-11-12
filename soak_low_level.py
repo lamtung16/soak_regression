@@ -1,6 +1,10 @@
 import numpy as np
 from sklearn.model_selection import KFold
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, RidgeCV
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.model_selection import GridSearchCV
+from sklearn.tree import DecisionTreeRegressor
 
 
 def evaluate(y_pred, y_test):
@@ -22,14 +26,37 @@ def linear_model(X_train, y_train, X_test, y_test):
     return evaluate(y_pred, y_test)
 
 
+def linear_BasExp_model(X_train, y_train, X_test, y_test):
+    pipeline = Pipeline([
+        ('poly', PolynomialFeatures()),
+        ('scaler', StandardScaler()),
+        ('ridge', RidgeCV(alphas=np.logspace(-2, 2, 10), cv=4))
+    ])
+    pipeline.fit(X_train, y_train)
+    y_pred = pipeline.predict(X_test)
+    return evaluate(y_pred, y_test)
+
+
+def treeCV_model(X_train, y_train, X_test, y_test):
+    param_grid = {'max_depth': np.arange(2, 21, 2)}
+    grid_search = GridSearchCV(DecisionTreeRegressor(), param_grid, cv=4, scoring='neg_mean_squared_error', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    y_pred = grid_search.best_estimator_.predict(X_test)
+    return evaluate(y_pred, y_test)
+
+
+all_models = {
+    "featureless": featureless_model,
+    "linear": linear_model,
+    "linear_BasExp": linear_BasExp_model,
+    "tree": treeCV_model
+}
+
+
 class SOAK:
     def __init__(self, n_splits=5, seed=123):
         self.n_splits = n_splits
         self.seed = seed
-        self.all_models = {
-            "featureless": featureless_model,
-            "linear": linear_model
-        }
 
     def split(self, X, y, subset_vec):
         splits = []
@@ -52,13 +79,30 @@ class SOAK:
         
         return splits
     
-    def model_eval(self, X_train, y_train, X_test, y_test, model='featureless'):
-        mse, mae = self.all_models[model](X_train, y_train, X_test, y_test)
+    @staticmethod
+    def downsample_majority(X, y, subset_vec, seed=123):
+        np.random.seed(seed)
+        unique_subsets, counts = np.unique(subset_vec, return_counts=True)
+        n_min = counts.min()
+        indices_to_keep = []
+        for subset in unique_subsets:
+            subset_indices = np.where(subset_vec == subset)[0]
+            chosen_indices = np.random.choice(subset_indices, size=n_min, replace=False)
+            indices_to_keep.extend(chosen_indices)
+        indices_to_keep = np.array(indices_to_keep)
+        np.random.shuffle(indices_to_keep)
+        X_down = X[indices_to_keep]
+        y_down = y[indices_to_keep]
+        subset_vec_down = subset_vec[indices_to_keep]
+        return X_down, y_down, subset_vec_down
+
+    @staticmethod
+    def model_eval(X_train, y_train, X_test, y_test, model='featureless'):
+        mse, mae = all_models[model](X_train, y_train, X_test, y_test)
         return mse, mae
     
     @staticmethod
-    def plot_metrics(df, subset_value, metric='mse', figsize=(5, 3)):
-        import pandas as pd
+    def plot_metrics(df, subset_value, subset_vec, metric='mse', figsize=(5, 3)):
         import matplotlib.pyplot as plt
 
         df = df[df['subset'] == subset_value].copy()
@@ -94,9 +138,9 @@ class SOAK:
         
         # Add a single shared legend at the bottom (or top)
         handles, labels = axes[0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc='upper right', fontsize=9)
+        fig.legend(handles[::-1], labels[::-1], loc='upper right', fontsize=9)
 
         # Adjust layout
-        fig.suptitle(f'Subset: {subset_value}', fontsize=10, fontweight='bold')
+        fig.suptitle(f'Subset: {subset_value}| n = {np.sum(subset_vec == subset_value)}', fontsize=10, fontweight='bold')
         plt.tight_layout()
         plt.show()
