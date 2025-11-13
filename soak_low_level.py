@@ -48,7 +48,7 @@ def treeCV_model(X_train, y_train, X_test, y_test):
 
 def mlpCV_model(X_train, y_train, X_test, y_test):
     param_grid = {'hidden_layer_sizes': [(10,), (20,), (10, 10), (20, 20)]}
-    grid_search = GridSearchCV(MLPRegressor(max_iter=1000), param_grid, cv=4, scoring='neg_mean_squared_error', n_jobs=-1)
+    grid_search = GridSearchCV(MLPRegressor(max_iter=1000, tol=0.1), param_grid, cv=4, scoring='neg_mean_squared_error', n_jobs=-1)
     grid_search.fit(X_train, y_train)
     y_pred = grid_search.best_estimator_.predict(X_test)
     return evaluate(y_pred, y_test)
@@ -104,8 +104,10 @@ class SOAK:
         return mse, mae
     
     @staticmethod
-    def plot_metrics(df, subset_value, subset_vec, metric='mse', figsize=(5, 3)):
+    def plot_metrics(df, subset_value, subset_vec=None, metric='mse', figsize=(5, 3)):
         import matplotlib.pyplot as plt
+
+        observation_info = "" if subset_vec is None else f"(n = {np.sum(subset_vec == subset_value)})"
 
         df = df[df['subset'] == subset_value].copy()
         df.loc[:, f'log_{metric}'] = np.log10(df[metric])
@@ -117,7 +119,7 @@ class SOAK:
         models = df['model'].unique()
         for i, category in enumerate(['all', 'same', 'other']):
             ax = axes[i]
-            ax.grid(alpha = 0.1)
+            ax.grid(alpha = 0.2)
             ax.set_ylim(-0.5, len(models) - 0.5)
             ax.set_ylabel(category, rotation=0, labelpad=15, va='center', fontweight='bold')
             ax.set_yticklabels([])
@@ -128,6 +130,6 @@ class SOAK:
         ax.set_xlabel(f'log({metric.upper()})')
         handles, labels = axes[0].get_legend_handles_labels()
         fig.legend(handles[::-1], labels[::-1], loc='upper right', fontsize=9)
-        fig.suptitle(f'Subset: {subset_value}| n = {np.sum(subset_vec == subset_value)}', fontsize=10, fontweight='bold')
+        fig.suptitle(f'Subset: {subset_value} {observation_info}', fontsize=10, fontweight='bold')
         plt.tight_layout()
-        plt.show()
+        return fig

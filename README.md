@@ -45,75 +45,76 @@ import numpy as np
 from soak_low_level import SOAK
 
 # --- synthetic data ---
-X = np.arange(8).reshape(-1, 1)
+X = np.arange(9).reshape(-1, 1)
 y = X.ravel()
 subset_vec = np.array(['even' if x % 2 == 0 else 'odd' for x in X.ravel()])
 
 # --- Initialize soak object ---
 soak_obj = SOAK(n_splits=2)
 
-for subset_val, category, fold_id, X_train, X_test, y_train, y_test in soak_obj.split(X, y, subset_vec):
-    print(f"subset: {subset_val:6s} --- category: {category:6s} --- fold {fold_id + 1}")
-    print("X_train:", X_train.ravel())
+for subset_value, category, X_train, y_train, X_test, y_test in soak_obj.split(X, y, subset_vec):
+    print(f"subset: {subset_value:6s} --- category: {category:6s}")
     print("X_test: ", X_test.ravel())
+    print("X_train:", X_train.ravel())
     print("-"*50)
 ```
 ```
 subset: even   --- category: same  
-X_train: [2 4]
-X_test:  [0 6]
+X_test:  [2 6 8]
+X_train: [0 4]
 --------------------------------------------------
 subset: even   --- category: other 
+X_test:  [2 6 8]
 X_train: [1 3 5 7]
-X_test:  [0 6]
 --------------------------------------------------
 subset: even   --- category: all   
-X_train: [2 4 1 3 5 7]
-X_test:  [0 6]
+X_test:  [2 6 8]
+X_train: [0 4 1 3 5 7]
 --------------------------------------------------
 subset: even   --- category: same  
-X_train: [0 6]
-X_test:  [2 4]
+X_test:  [0 4]
+X_train: [2 6 8]
 --------------------------------------------------
 subset: even   --- category: other 
+X_test:  [0 4]
 X_train: [1 3 5 7]
-X_test:  [2 4]
 --------------------------------------------------
 subset: even   --- category: all   
-X_train: [0 6 1 3 5 7]
-X_test:  [2 4]
+X_test:  [0 4]
+X_train: [2 6 8 1 3 5 7]
 --------------------------------------------------
 subset: odd    --- category: same  
+X_test:  [1 7]
 X_train: [3 5]
-X_test:  [1 7]
 --------------------------------------------------
 subset: odd    --- category: other 
-X_train: [0 2 4 6]
 X_test:  [1 7]
+X_train: [0 2 4 6 8]
 --------------------------------------------------
 subset: odd    --- category: all   
-X_train: [3 5 0 2 4 6]
 X_test:  [1 7]
+X_train: [3 5 0 2 4 6 8]
 --------------------------------------------------
 subset: odd    --- category: same  
-X_train: [1 7]
 X_test:  [3 5]
+X_train: [1 7]
 --------------------------------------------------
 subset: odd    --- category: other 
-X_train: [0 2 4 6]
 X_test:  [3 5]
+X_train: [0 2 4 6 8]
 --------------------------------------------------
 subset: odd    --- category: all   
-X_train: [1 7 0 2 4 6]
 X_test:  [3 5]
+X_train: [1 7 0 2 4 6 8]
 --------------------------------------------------
 ```
 
-## Folder Structure
+## Repo Structure
 - **`data`**: Contains all datasets in CSV format. Feature columns has to start with 'X_'
 - **`results`**: Contains CSV files of computed errors for each dataset.  
-- **`figures`**: Contains figures of errors for each dataset.  
-- **`notebooks`**: Jupyter notebooks for testing.
+- **`figures`**: Contains figures of errors for each dataset.
+- `*.ipynb`: notebooks for testing.
+- `*.py`: source code.
 
 ## Figures
 ![alt text](figures/synthetic/subset/sum.png)
