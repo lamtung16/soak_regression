@@ -12,7 +12,7 @@ from scipy.stats import uniform
 def evaluate(y_pred, y_test):
     rmse = np.sqrt(np.mean((y_test - y_pred) ** 2))
     mae = np.median(np.abs(y_test - y_pred))
-    return rmse, mae
+    return y_pred, (rmse, mae)
 
 
 def featureless_model(X_train, y_train, X_test, y_test):
@@ -95,7 +95,7 @@ class SOAKFold:
             same_idx = np.where(subset_vec == subset_value)[0]
             other_idx = np.where(subset_vec != subset_value)[0]
             kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
-            for (train_idx, test_idx) in kf.split(same_idx):
+            for fold_id, (train_idx, test_idx) in enumerate(kf.split(same_idx)):
                 X_train_same, y_train_same = X[same_idx[train_idx]], y[same_idx[train_idx]]
                 X_train_other, y_train_other = X[other_idx], y[other_idx]
                 for category, (X_train, y_train) in {
@@ -103,7 +103,7 @@ class SOAKFold:
                     'other': (X_train_other, y_train_other),
                     'all': (np.vstack([X_train_same, X_train_other]), np.concatenate([y_train_same, y_train_other]))
                 }.items():
-                    splits.append([subset_value, category, X_train, y_train, X[same_idx[test_idx]], y[same_idx[test_idx]]])
+                    splits.append([subset_value, category, fold_id + 1, X_train, y_train, X[same_idx[test_idx]], y[same_idx[test_idx]]])
         return splits
     
     # @staticmethod
@@ -124,34 +124,75 @@ class SOAKFold:
         return all_models[model](X_train, y_train, X_test, y_test)
     
     @staticmethod
-    def plot_metrics(df, subset_value, subset_vec=None, metric='rmse', figsize=(5, 3)):
+    def plot_metrics(results_df, subset_value, model, metric, figsize=(6, 2.5)):
+        import pandas as pd
         import matplotlib.pyplot as plt
+        from matplotlib.ticker import FormatStrFormatter
+        
+        _, counts = np.unique(results_df['downsample'], return_counts=True)
 
-        observation_info = "" if subset_vec is None else f"(n = {np.sum(subset_vec == subset_value)})"
+        df = results_df[
+            (results_df['subset'] == subset_value) &
+            (results_df['model'] == model)
+        ].copy()
 
-        df = df[df['subset'] == subset_value].copy()
-        df = df.groupby(['subset', 'category', 'model']).agg(
-            avg=(f'{metric}', 'mean'),
-            sd=(f'{metric}', 'std'),
+        df = df.groupby(
+            ['subset', 'category', 'model', 'downsample', 'train_size']
+        ).agg(
+            avg=(metric, 'mean'),
+            sd=(metric, lambda x: x.std(ddof=0)),
+            test_size=('test_size', 'min'),
         ).reset_index()
-        fig, axes = plt.subplots(nrows=3, ncols=1, figsize=figsize, sharex=True)
-        models = df['model'].unique()
-        for i, category in enumerate(['all', 'same', 'other']):
-            ax = axes[i]
-            ax.grid(alpha = 0.2)
-            ax.set_ylim(-0.5, len(models) - 0.5)
-            ax.set_ylabel(category, rotation=0, labelpad=15, va='center', fontweight='bold')
-            ax.set_yticklabels([])
-            category_data = df[df['category'] == category]
-            for k, model in enumerate(models):
-                row = category_data[category_data['model'] == model]
-                _x = row['avg'].values[0]
-                _xerr = row['sd'].values[0]
-                ax.errorbar(_x, k, xerr=_xerr, fmt='o', label=model)
-                ax.text(_x, k, f"{_x:.3f}±{_xerr:.3f}", ha='center', va='bottom')
-        ax.set_xlabel(f'{metric.upper()}')
-        handles, labels = axes[0].get_legend_handles_labels()
-        fig.legend(handles[::-1], labels[::-1], loc='upper right', fontsize=9)
-        fig.suptitle(f'Subset: {subset_value} {observation_info}', fontsize=10, fontweight='bold')
-        plt.tight_layout()
+
+        agg_df = (
+            df[df["downsample"] == False]
+            .groupby(["category", "model", "subset"], as_index=False)
+            .agg({
+                "train_size": "min",
+                "avg": "mean",
+                "sd": "mean",
+                "test_size": "min"
+            })
+        )
+        agg_df["downsample"] = False
+
+        final_df = pd.concat(
+            [agg_df, df[df["downsample"] == True].copy()],
+            ignore_index=True
+        ).sort_values(['category', 'train_size'])
+
+        # ----- Create and return the figure -----
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.set_ylim(-0.5, final_df.shape[0] - 0.5)
+
+        for _, row in final_df.iterrows():
+            _x = row['avg']
+            _y = f"{row['category']}.{row['train_size']}"
+            _xerr = row['sd']
+            _color = 'red' if row['downsample'] else 'black'
+
+            ax.errorbar(x=_x, y=_y, xerr=_xerr, fmt='o', color=_color)
+            ax.text(_x, _y, f"{_x:.3f}±{_xerr:.3f}",
+                    ha='center', va='bottom', color=_color)
+
+        ax.plot([], [], 'o', color='red',   label='reduced')
+        ax.plot([], [], 'o', color='black', label='full')
+
+        ax.set_yticks(final_df.index)
+        ax.set_yticklabels(final_df.apply(lambda r: f"{r['category']}.{r['train_size']}", axis=1), fontsize=9)
+        ax.set_xlabel(metric.upper())
+
+        ax.set_title(
+            f"subset: {final_df['subset'].iloc[0]} || "
+            f"model: {final_df['model'].iloc[0]} || "
+            f"{results_df[results_df['downsample'] == False].groupby(['subset', 'category', 'model']).size().min()} folds || "
+            f"{int(counts.max()/counts.min())} random seeds",
+            fontsize=10,
+            x=0.35
+        )
+
+        ax.legend(bbox_to_anchor=(1, 1.2))
+        ax.grid(alpha=0.5)
+        ax.xaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+
         return fig

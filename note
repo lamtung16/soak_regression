@@ -1,6 +1,8 @@
-for x in {0..100}; do
+for x in {0..10}; do
     python results_generator.py "$x"
 done
+
+parallel python results_generator.py ::: {0..10}
 
 qsip_pc2_all,experiment,growth_per_day
 qsip_pc2_all,copies_16s,growth_per_day
