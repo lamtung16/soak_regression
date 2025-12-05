@@ -117,7 +117,6 @@ X_train: [1 7 0 2 4 6 8]
 - `*.py`: source code.
 
 ## Figures
-![alt text](figures/synthetic/subset/sum.png)
 
 ## TODO
 - Find more regression datasets:

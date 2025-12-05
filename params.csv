@@ -9,3 +9,15 @@ WorkersCompensation,MaritalStatus,UltimateIncurredClaimCost,True
 WorkersCompensation,PartTimeFullTime,UltimateIncurredClaimCost,True
 WorkersCompensation,DependentChildren,UltimateIncurredClaimCost,True
 WorkersCompensation,DependentsOther,UltimateIncurredClaimCost,True
+qsip_pc2_all,experiment,growth_per_day,True
+qsip_pc2_all,copies_16s,growth_per_day,True
+qsip_pc2_all,details,growth_per_day,True
+qsip_pc2_all,cat1,growth_per_day,True
+qsip_pc2_all,cat2,growth_per_day,True
+qsip_pc2_all,cat3,growth_per_day,True
+qsip_pc2_all,kingdom,growth_per_day,True
+qsip_pc2_all,isotope,growth_per_day,True
+qsip_pc2_all,time,growth_per_day,True
+qsip_pc2_all,replicate,growth_per_day,True
+qsip_pc2_all,treatment,growth_per_day,True
+qsip_pc2_all,site,growth_per_day,True

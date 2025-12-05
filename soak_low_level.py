@@ -50,37 +50,11 @@ def treeCV_model(X_train, y_train, X_test, y_test):
     return evaluate(y_pred, y_test)
 
 
-def mlpCV_model(X_train, y_train, X_test, y_test):
-    pipeline = Pipeline([
-        ('scaler', StandardScaler()),
-        ('mlp', MLPRegressor(max_iter=10000, early_stopping=True))
-    ])
-    param_dist = {
-        'mlp__hidden_layer_sizes': [(20,), (20, 20), (80), (80, 80)],
-        'mlp__activation': ['relu', 'tanh'],
-        'mlp__solver': ['adam', 'lbfgs'],
-        'mlp__alpha': uniform(0.001, 10),
-    }
-    random_search = RandomizedSearchCV(
-        pipeline,
-        param_distributions=param_dist,
-        n_iter=40,
-        cv=4,
-        scoring='neg_mean_squared_error',
-        n_jobs=-1
-    )
-    random_search.fit(X_train, y_train)
-    best_model = random_search.best_estimator_
-    y_pred = best_model.predict(X_test)
-    return evaluate(y_pred, y_test)
-
-
 all_models = {
     "featureless": featureless_model,
     "linear": linear_model,
     "linear_BasExp": linear_BasExp_model,
-    "tree": treeCV_model,
-    "mlp": mlpCV_model
+    "tree": treeCV_model
 }
 
 
@@ -105,94 +79,7 @@ class SOAKFold:
                 }.items():
                     splits.append([subset_value, category, fold_id + 1, X_train, y_train, X[same_idx[test_idx]], y[same_idx[test_idx]]])
         return splits
-    
-    # @staticmethod
-    # def downsample_majority(X, y, subset_vec, seed=123):
-    #     np.random.seed(seed)
-    #     unique_subsets, counts = np.unique(subset_vec, return_counts=True)
-    #     n_min = counts.min()
-    #     indices_to_keep = []
-    #     for subset in unique_subsets:
-    #         subset_indices = np.where(subset_vec == subset)[0]
-    #         chosen_indices = np.random.choice(subset_indices, size=n_min, replace=False)
-    #         indices_to_keep.extend(chosen_indices)
-    #     indices_to_keep = np.array(indices_to_keep)
-    #     return X[indices_to_keep], y[indices_to_keep], subset_vec[indices_to_keep]
 
     @staticmethod
     def model_eval(X_train, y_train, X_test, y_test, model='featureless'):
         return all_models[model](X_train, y_train, X_test, y_test)
-    
-    @staticmethod
-    def plot_metrics(results_df, subset_value, model, metric, figsize=(6, 2.5)):
-        import pandas as pd
-        import matplotlib.pyplot as plt
-        from matplotlib.ticker import FormatStrFormatter
-        
-        _, counts = np.unique(results_df['downsample'], return_counts=True)
-
-        df = results_df[
-            (results_df['subset'] == subset_value) &
-            (results_df['model'] == model)
-        ].copy()
-
-        df = df.groupby(
-            ['subset', 'category', 'model', 'downsample', 'train_size']
-        ).agg(
-            avg=(metric, 'mean'),
-            sd=(metric, lambda x: x.std(ddof=0)),
-            test_size=('test_size', 'min'),
-        ).reset_index()
-
-        agg_df = (
-            df[df["downsample"] == False]
-            .groupby(["category", "model", "subset"], as_index=False)
-            .agg({
-                "train_size": "min",
-                "avg": "mean",
-                "sd": "mean",
-                "test_size": "min"
-            })
-        )
-        agg_df["downsample"] = False
-
-        final_df = pd.concat(
-            [agg_df, df[df["downsample"] == True].copy()],
-            ignore_index=True
-        ).sort_values(['category', 'train_size'])
-
-        # ----- Create and return the figure -----
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.set_ylim(-0.5, final_df.shape[0] - 0.5)
-
-        for _, row in final_df.iterrows():
-            _x = row['avg']
-            _y = f"{row['category']}.{row['train_size']}"
-            _xerr = row['sd']
-            _color = 'red' if row['downsample'] else 'black'
-
-            ax.errorbar(x=_x, y=_y, xerr=_xerr, fmt='o', color=_color)
-            ax.text(_x, _y, f"{_x:.3f}±{_xerr:.3f}",
-                    ha='center', va='bottom', color=_color)
-
-        ax.plot([], [], 'o', color='red',   label='reduced')
-        ax.plot([], [], 'o', color='black', label='full')
-
-        ax.set_yticks(final_df.index)
-        ax.set_yticklabels(final_df.apply(lambda r: f"{r['category']}.{r['train_size']}", axis=1), fontsize=9)
-        ax.set_xlabel(metric.upper())
-
-        ax.set_title(
-            f"subset: {final_df['subset'].iloc[0]} || "
-            f"model: {final_df['model'].iloc[0]} || "
-            f"{results_df[results_df['downsample'] == False].groupby(['subset', 'category', 'model']).size().min()} folds || "
-            f"{int(counts.max()/counts.min())} random seeds",
-            fontsize=10,
-            x=0.35
-        )
-
-        ax.legend(bbox_to_anchor=(1, 1.2))
-        ax.grid(alpha=0.5)
-        ax.xaxis.set_major_formatter(FormatStrFormatter('%.3f'))
-
-        return fig

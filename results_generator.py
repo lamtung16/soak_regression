@@ -11,9 +11,11 @@ dataset = params[idx]["dataset"]
 subset_col = params[idx]["subset_col"]
 target_col = params[idx]["target_col"]
 log_target = bool(params[idx]["log_target"])
+n_folds = 5
+n_seeds = 3
 
 # Load data
-data = np.genfromtxt(f'data/{dataset}.csv.xz', delimiter=',', dtype=None, names=True, encoding=None)
+data = np.genfromtxt(f'data/{dataset}.csv.xz', delimiter=',', dtype=None, names=True, encoding=None, invalid_raise=False)
 X = np.column_stack([data[name] for name in data.dtype.names if name.startswith('X_')])
 y = data[target_col]
 subset_vec = data[subset_col]
@@ -27,7 +29,7 @@ if log_target:
 y = (y - np.mean(y)) / np.std(y)
 
 # --- Initialize soak object ---
-soak_obj = SOAKFold(n_splits=5)
+soak_obj = SOAKFold(n_splits=n_folds)
 
 # --- Analyze all subsets ---
 results = []
@@ -51,7 +53,7 @@ for subset_value, category, fold_id, X_train, y_train, X_test, y_test in soak_ob
                 })
 
 
-for seed_id in range(3):
+for seed_id in range(n_seeds):
     for subset_value, category, fold_id, X_train, y_train, X_test, y_test in soak_obj.split(X, y, subset_vec):
         for model in model_list:
             for n in [((soak_obj.n_splits - 1)/soak_obj.n_splits) * np.sum(subset_vec == subset_value), np.sum(subset_vec != subset_value)]:
