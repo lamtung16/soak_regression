@@ -5,12 +5,13 @@ import pandas as pd
 from soak_low_level import SOAKFold
 
 # --- Read dataset name from params.csv ---
-params = np.genfromtxt("params.csv", delimiter=",", dtype=None, names=True, encoding="utf-8")
-idx = int(sys.argv[1])
-dataset = params[idx]["dataset"]
-subset_col = params[idx]["subset_col"]
-target_col = params[idx]["target_col"]
-log_target = bool(params[idx]["log_target"])
+params = pd.read_csv("params.csv")
+row_idx = int(sys.argv[1])
+row = params.iloc[row_idx]
+dataset = row["dataset"]
+subset_col = row["subset_col"]
+target_col = row["target_col"]
+log_target = bool(row["log_target"])
 n_folds = 5
 n_seeds = 3
 
@@ -38,7 +39,7 @@ for subset_value, category, fold_id, X_train, y_train, X_test, y_test in soak_ob
         y_pred, (rmse, mae) = soak_obj.model_eval(X_train, y_train, X_test, y_test, model)
         predictions_path = f"predictions/{dataset}/{subset_col}"
         os.makedirs(predictions_path, exist_ok=True)
-        np.savez_compressed(f"{predictions_path}/{subset_value}.{category}.{fold_id}.{model}.{False}.{0}.{len(y_train)}.npz",y=y)
+        np.savez_compressed(f"{predictions_path}/{subset_value}.{category}.{fold_id}.{model}.{False}.{0}.{len(y_train)}.npz", y_pred=y_pred)
         results.append({
                     "subset": subset_value,
                     "category": category,
@@ -61,7 +62,7 @@ for seed_id in range(n_seeds):
                     if int(n) < len(y_train) - 1:
                         idx = np.random.choice(len(y_train), size=int(n), replace=False)
                         y_pred, (rmse, mae) = soak_obj.model_eval(X_train[idx], y_train[idx], X_test, y_test, model)
-                        np.savez_compressed(f"{predictions_path}/{subset_value}.{category}.{fold_id}.{model}.{True}.{seed_id + 1}.{len(idx)}.npz",y=y)
+                        np.savez_compressed(f"{predictions_path}/{subset_value}.{category}.{fold_id}.{model}.{True}.{seed_id + 1}.{len(idx)}.npz", y_pred=y_pred)
                         results.append({
                                     "subset": subset_value,
                                     "category": category,

@@ -3,11 +3,8 @@ from sklearn.model_selection import KFold
 from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.model_selection import GridSearchCV
 from sklearn.tree import DecisionTreeRegressor
-from sklearn.neural_network import MLPRegressor
-from scipy.stats import uniform
-
 
 def evaluate(y_pred, y_test):
     rmse = np.sqrt(np.mean((y_test - y_pred) ** 2))
@@ -79,6 +76,25 @@ class SOAKFold:
                 }.items():
                     splits.append([subset_value, category, fold_id + 1, X_train, y_train, X[same_idx[test_idx]], y[same_idx[test_idx]]])
         return splits
+    
+
+    def split_idx(self, subset_vec):
+        splits = []
+        for subset_value in np.unique(subset_vec):
+            same_idx = np.where(subset_vec == subset_value)[0]
+            other_idx = np.where(subset_vec != subset_value)[0]
+            kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
+            for fold_id, (train_idx, test_idx) in enumerate(kf.split(same_idx)):
+                train_same_idx = same_idx[train_idx]
+                test_same_idx = same_idx[test_idx]
+                for category, train_idx_final in {
+                    'same': train_same_idx,
+                    'other': other_idx,
+                    'all': np.concatenate([train_same_idx, other_idx])
+                }.items():
+                    splits.append([subset_value, category, fold_id + 1, train_idx_final, test_same_idx])
+        return splits
+
 
     @staticmethod
     def model_eval(X_train, y_train, X_test, y_test, model='featureless'):
