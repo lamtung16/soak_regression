@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.lines import Line2D
 import matplotlib.cm as cm
+from scipy.stats import ttest_ind
+
 
 def soak_plot_multiple_models(results_df, models = None, figsize = (16, 5)):
     if models == None:
@@ -104,7 +106,7 @@ def soak_plot_multiple_models(results_df, models = None, figsize = (16, 5)):
 
 
 
-def soak_plot_one_model(results_df, subset_value, model, metric, figsize=(6, 2.5)):
+def soak_plot_one_model(results_df, subset_value, model, metric='rmse', figsize=(6, 2.5)):
     _, counts = np.unique(results_df['downsample'], return_counts=True)
     df = results_df[(results_df['subset'] == subset_value) & (results_df['model'] == model)].copy()
     df = df.groupby(['subset', 'category', 'model', 'downsample', 'train_size']).agg(
@@ -147,3 +149,86 @@ def soak_plot_one_model(results_df, subset_value, model, metric, figsize=(6, 2.5
     plt.grid(alpha=0.5)
     plt.gca().xaxis.set_major_formatter(FormatStrFormatter('%.3f'))
     plt.show()
+
+
+
+
+def soak_plot_one_model_extend(results_df, subset_value, model, metric="rmse", figsize=(6, 2.5)):
+    # filter
+    category_order = ["other", "other-same", "same", "all-same", "all"]
+    df = results_df[
+        (results_df["subset"] == subset_value) &
+        (results_df["model"] == model) &
+        (~results_df["downsample"])
+    ].copy()
+    base_cats = ["other", "same", "all"]
+
+    # base summary
+    summary = (
+        df.groupby("category", observed=False)[metric]
+        .agg(mean="mean", std="std")
+        .reindex(base_cats)
+        .reset_index()
+    )
+
+    # calculate p-values for combined categories
+    def pval(cat1, cat2):
+        x = df.loc[df["category"] == cat1, metric]
+        y = df.loc[df["category"] == cat2, metric]
+        t_stat, p = ttest_ind(x, y, equal_var=False)  # Welch's t-test
+        return p
+
+    combined = pd.DataFrame({
+        "category": ["other-same", "all-same"],
+        "mean": [
+            df.loc[df["category"].isin(["same", "other"]), metric].mean(),
+            df.loc[df["category"].isin(["same", "all"]), metric].mean(),
+        ],
+        "std": [
+            df.loc[df["category"].isin(["same", "other"]), metric].std(),
+            df.loc[df["category"].isin(["same", "all"]), metric].std(),
+        ],
+        "p_value": [
+            pval("other", "same"),
+            pval("all", "same")
+        ]
+    })
+
+    # merge base summary (no p-values for single categories)
+    summary["p_value"] = np.nan
+    summary = pd.concat([summary, combined], ignore_index=True)
+    summary = (
+        summary.assign(category=lambda x: pd.Categorical(x["category"], category_order, ordered=True))
+        .sort_values("category")
+        .reset_index(drop=True)
+    )
+
+    # y positions
+    y_pos = {cat: i for i, cat in enumerate(category_order)}
+
+    # plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    for i, row in summary.iterrows():
+        y = y_pos[row["category"]]
+        mean = row["mean"]
+        sd = row["std"]
+        color = 'black' if i % 2 == 0 else 'grey'
+        text = f"{mean:.5f} ± {sd:.5f}" if i % 2 == 0 else f"P = {row['p_value']:.4f}"
+        ax.errorbar(mean, y, xerr=sd, fmt="o", color=color, markersize=4)
+        ax.text(mean, y + 0.15, text, ha="center", va="bottom", fontsize=8)
+
+    # y-axis formatting
+    ax.set_yticks([y_pos[c] for c in category_order])
+    ax.set_yticklabels(category_order, fontsize=9)
+    ax.set_ylim(-0.5, len(category_order) - 0.2)
+
+    # labels & title
+    ax.set_xlabel(metric.upper(), fontsize=8)
+    ax.set_title(f"subset: {subset_value} | model: {model} | {df['fold_id'].nunique()} folds", fontsize=9)
+    ax.grid(alpha=0.5)
+    ax.xaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+    ax.tick_params(axis='x', labelsize=9)
+    fig.tight_layout()
+    plt.close(fig)
+    return fig
