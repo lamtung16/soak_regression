@@ -177,25 +177,20 @@ def soak_plot_one_model_extend(results_df, subset_value, model, metric="rmse", f
         y = df.loc[df["category"] == cat2, metric]
         t_stat, p = ttest_ind(x, y, equal_var=False)  # Welch's t-test
         return p
-    
-    # calculate std of absolute differences
-    def abs_diff_std(cat1, cat2):
-        x = df.loc[df["category"] == cat1, metric].reset_index(drop=True)
-        y = df.loc[df["category"] == cat2, metric].reset_index(drop=True)
-        # align lengths: take min length to avoid mismatches
-        min_len = min(len(x), len(y))
-        return (x[:min_len] - y[:min_len]).abs().std()
 
+    mean_same = df.loc[df["category"] == "same", metric].mean()
+    mean_other = df.loc[df["category"] == "other", metric].mean()
+    mean_all = df.loc[df["category"] == "all", metric].mean()
 
     combined = pd.DataFrame({
         "category": ["other-same", "all-same"],
         "mean": [
-            df.loc[df["category"].isin(["same", "other"]), metric].mean(),
-            df.loc[df["category"].isin(["same", "all"]), metric].mean(),
+            (mean_same + mean_other) / 2,
+            (mean_same + mean_all) / 2,
         ],
         "std": [
-            abs_diff_std("other", "same"),
-            abs_diff_std("all", "same"),
+            abs(mean_other - mean_same) / 2,
+            abs(mean_all - mean_same) / 2,
         ],
         "p_value": [
             pval("other", "same"),
