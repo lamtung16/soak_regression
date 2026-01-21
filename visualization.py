@@ -155,7 +155,7 @@ def soak_plot_one_model(results_df, subset_value, model, metric='rmse', figsize=
 
 def soak_plot_one_model_extend(results_df, subset_value, model, metric="rmse", figsize=(6, 2.5)):
     # filter
-    category_order = ["other", "other-same", "same", "all-same", "all"]
+    category_order = ["all", "all-same", "same", "other-same", "other"]
     df = results_df[
         (results_df["subset"] == subset_value) &
         (results_df["model"] == model) &
@@ -177,6 +177,15 @@ def soak_plot_one_model_extend(results_df, subset_value, model, metric="rmse", f
         y = df.loc[df["category"] == cat2, metric]
         t_stat, p = ttest_ind(x, y, equal_var=False)  # Welch's t-test
         return p
+    
+    # calculate std of absolute differences
+    def abs_diff_std(cat1, cat2):
+        x = df.loc[df["category"] == cat1, metric].reset_index(drop=True)
+        y = df.loc[df["category"] == cat2, metric].reset_index(drop=True)
+        # align lengths: take min length to avoid mismatches
+        min_len = min(len(x), len(y))
+        return (x[:min_len] - y[:min_len]).abs().std()
+
 
     combined = pd.DataFrame({
         "category": ["other-same", "all-same"],
@@ -185,8 +194,8 @@ def soak_plot_one_model_extend(results_df, subset_value, model, metric="rmse", f
             df.loc[df["category"].isin(["same", "all"]), metric].mean(),
         ],
         "std": [
-            df.loc[df["category"].isin(["same", "other"]), metric].std(),
-            df.loc[df["category"].isin(["same", "all"]), metric].std(),
+            abs_diff_std("other", "same"),
+            abs_diff_std("all", "same"),
         ],
         "p_value": [
             pval("other", "same"),
@@ -215,7 +224,8 @@ def soak_plot_one_model_extend(results_df, subset_value, model, metric="rmse", f
         sd = row["std"]
         color = 'black' if i % 2 == 0 else 'grey'
         text = f"{mean:.5f} ± {sd:.5f}" if i % 2 == 0 else f"P = {row['p_value']:.4f}"
-        ax.errorbar(mean, y, xerr=sd, fmt="o", color=color, markersize=4)
+        marker_size = 4 if i % 2 == 0 else 0
+        ax.errorbar(mean, y, xerr=sd, fmt="o", color=color, markersize=marker_size)
         ax.text(mean, y + 0.15, text, ha="center", va="bottom", fontsize=8)
 
     # y-axis formatting
