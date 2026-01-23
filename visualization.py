@@ -237,3 +237,115 @@ def soak_plot_one_model_extend(results_df, subset_value, model, metric="rmse", f
     fig.tight_layout()
     plt.close(fig)
     return fig
+
+
+def process_df(results_df, subset_value, model, metric):
+    df = results_df[
+    (results_df["subset"] == subset_value) &
+    (results_df["model"] == model) &
+    (~results_df["downsample"])
+    ].copy()
+    base_cats = ["other", "same", "all"]
+
+    # base summary
+    summary = (
+        df.groupby("category", observed=False)[metric]
+        .agg(mean="mean", std="std")
+        .reindex(base_cats)
+        .reset_index()
+    )
+
+    # calculate p-values for combined categories
+    def pval(cat1, cat2):
+        x = df.loc[df["category"] == cat1, metric]
+        y = df.loc[df["category"] == cat2, metric]
+        t_stat, p = ttest_ind(x, y, equal_var=False)  # Welch's t-test
+        return p
+    
+    mean_same = df.loc[df["category"] == "same", metric].mean()
+    mean_other = df.loc[df["category"] == "other", metric].mean()
+    mean_all = df.loc[df["category"] == "all", metric].mean()
+
+    combined = pd.DataFrame({
+        "category": ["other-same", "all-same"],
+        "mean": [
+            (mean_same + mean_other) / 2,
+            (mean_same + mean_all) / 2,
+        ],
+        "std": [
+            abs(mean_other - mean_same) / 2,
+            abs(mean_all - mean_same) / 2,
+        ],
+        "p_value": [
+            pval("other", "same"),
+            pval("all", "same")
+        ]
+    })
+
+    # merge base summary (no p-values for single categories)
+    category_order = ["all", "all-same", "same", "other-same", "other"]
+    summary["p_value"] = np.nan
+    summary = pd.concat([summary, combined], ignore_index=True)
+    summary = (
+        summary.assign(category=lambda x: pd.Categorical(x["category"], category_order, ordered=True))
+        .sort_values("category")
+        .reset_index(drop=True)
+    )
+    return summary
+
+
+def soak_plot_matrix(results_df, models, subset_values, metric='rmse', subplot_size=(5, 2), extend=(0.01, 0.01)):   
+    sizes = subplot_size
+    category_order = ["all", "all-same", "same", "other-same", "other"]
+    y_pos = {cat: i for i, cat in enumerate(category_order)}
+
+    fig, axes = plt.subplots(
+        nrows=len(models),
+        ncols=len(subset_values),
+        figsize=(sizes[0]*len(subset_values), sizes[1]*len(models)),
+        sharex=True,
+        sharey=True
+    )
+
+    for row_idx, model in enumerate(models):
+        for col_idx, subset_value in enumerate(subset_values):
+            ax = axes[row_idx, col_idx]
+
+            summary = process_df(results_df, subset_value, model, metric)
+
+            for i, row in summary.iterrows():
+                y = y_pos[row["category"]]
+                mean = row["mean"]
+                sd = row["std"]
+
+                color = "black" if i % 2 == 0 else "grey"
+                text = (f"{mean:.4f} ± {sd:.4f}" if i % 2 == 0 else f"P = {row['p_value']:.5f}")
+                marker_size = 4.5 if i % 2 == 0 else 0
+                _sd = 2*sd if i % 2 == 0 else sd
+                ax.errorbar(mean, y, xerr=_sd, fmt="o", color=color, markersize=marker_size, linewidth=3)
+                ax.text(mean, y + 0.12, text, ha="center", va="bottom", fontsize=10)
+                left, right = ax.get_xlim()
+                ax.set_xlim(left - extend[0], right + extend[1])
+
+            # --- LEFT: category labels on every subplot ---
+            ax.set_yticks([y_pos[c] for c in category_order])
+            ax.set_yticklabels(category_order, fontsize=12)
+            ax.set_ylim(-0.5, len(category_order) - 0.2)
+
+            ax.grid(alpha=0.5)
+            ax.xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+            ax.tick_params(axis="x", labelsize=12)
+
+            # --- TOP: subset titles ---
+            if row_idx == 0:
+                ax.set_title(f"subset: {subset_value}", fontsize=12)
+
+            # --- RIGHT: model labels ---
+            if col_idx == len(subset_values) - 1:
+                ax.yaxis.set_label_position("right")
+                ax.set_ylabel(f"model: {model}", fontsize=12, rotation=270, labelpad=15)
+
+    fig.supxlabel(f"{metric.upper()} (mean +/- 2sd) over 5 folds", fontsize=13)
+    fig.tight_layout(h_pad=0.2, w_pad=0.2)
+    plt.close(fig)
+    return fig
