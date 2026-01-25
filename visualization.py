@@ -109,23 +109,36 @@ def soak_plot_multiple_models(results_df, models = None, figsize = (16, 5)):
 def soak_plot_one_model(results_df, subset_value, model, metric='rmse', figsize=(6, 2.5)):
     _, counts = np.unique(results_df['downsample'], return_counts=True)
     df = results_df[(results_df['subset'] == subset_value) & (results_df['model'] == model)].copy()
-    df = df.groupby(['subset', 'category', 'model', 'downsample', 'train_size']).agg(
-        avg=(f'{metric}', 'mean'),
-        sd=(f'{metric}', lambda x: x.std(ddof=0)),
-        test_size=('test_size', 'min'),
-    ).reset_index()
-    agg_df = (
-    df[df["downsample"] == False]
-    .groupby(["category", "model", "subset"], as_index=False)
-    .agg({
-        "train_size": "min",
-        "avg": "mean",
-        "sd": "mean",
-        "test_size": "min"
-    })
+    def summarize(df, group_cols, extra_aggs=None):
+        aggs = {
+            'avg': (metric, 'mean'),
+            'sd': (metric, lambda x: x.std()),
+            'test_size': ('test_size', 'min'),
+        }
+        if extra_aggs:
+            aggs.update(extra_aggs)
+
+        return (
+            df.groupby(group_cols)
+            .agg(**aggs)
+            .reset_index()
+        )
+
+    df_ds = summarize(
+        df.query('downsample'),
+        ['subset', 'category', 'model', 'downsample', 'train_size']
     )
-    agg_df["downsample"] = False
-    final_df = pd.concat([agg_df, df[df["downsample"] == True].copy()], ignore_index=True).sort_values(['category', 'train_size'])
+
+    df_not_ds = summarize(
+        df.query('~downsample'),
+        ['subset', 'category', 'model', 'downsample'],
+        extra_aggs={'train_size': ('train_size', 'min')}
+    )
+
+    final_df = (
+        pd.concat([df_not_ds, df_ds], ignore_index=True)
+        .sort_values(['category', 'train_size'])
+    )
 
     plt.figure(figsize=figsize)
     plt.ylim(-0.5, final_df.shape[0] - 0.5)
@@ -319,7 +332,7 @@ def soak_plot_matrix(results_df, models, subset_values, metric='rmse', subplot_s
                 sd = row["std"]
 
                 color = "black" if i % 2 == 0 else "grey"
-                text = (f"{mean:.4f} ± {sd:.4f}" if i % 2 == 0 else f"P = {row['p_value']:.5f}")
+                text = (f"{mean:.4f} ± {2*sd:.4f}" if i % 2 == 0 else f"P = {row['p_value']:.5f}")
                 marker_size = 4.5 if i % 2 == 0 else 0
                 _sd = 2*sd if i % 2 == 0 else sd
                 ax.errorbar(mean, y, xerr=_sd, fmt="o", color=color, markersize=marker_size, linewidth=3)
