@@ -139,7 +139,7 @@ def soak_plot_one_model(results_df, subset_value, model, metric='rmse', figsize=
     plt.plot([], [], 'o', color='red',   label='reduced')
     plt.plot([], [], 'o', color='black', label='full')
     plt.yticks(final_df.apply(lambda r: f"{r['category']}.{r['train_size']}", axis=1), fontsize=9)
-    plt.xlabel(f"{metric.upper()}")
+    plt.xlabel(f"{metric.upper()} mean ± 1sd")
     plt.title(f"subset: {final_df['subset'][0]} || "
               f"model: {final_df['model'][0]} || "
               f"{results_df['fold_id'].max()} folds || "
@@ -338,14 +338,14 @@ def soak_plot_matrix(results_df, models, subset_values, metric='rmse', subplot_s
 
             # --- TOP: subset titles ---
             if row_idx == 0:
-                ax.set_title(f"subset: {subset_value}", fontsize=12)
+                ax.set_title(f"{subset_value} ({results_df[results_df['subset']==subset_value].iloc[0]['test_size']*len(set(results_df['fold_id']))} rows)", fontsize=12)
 
             # --- RIGHT: model labels ---
             if col_idx == len(subset_values) - 1:
                 ax.yaxis.set_label_position("right")
                 ax.set_ylabel(f"model: {model}", fontsize=12, rotation=270, labelpad=15)
 
-    fig.supxlabel(f"{metric.upper()} (mean +/- 2sd) over 5 folds", fontsize=13)
+    fig.supxlabel(f"{metric.upper()} (mean ± 2sd) over 5 folds", fontsize=13)
     fig.tight_layout(h_pad=0.2, w_pad=0.2)
     plt.close(fig)
     return fig
