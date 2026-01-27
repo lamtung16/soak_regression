@@ -252,18 +252,33 @@ def soak_plot_one_model_extend(results_df, subset_value, model, metric="rmse", f
     return fig
 
 
-def process_df(results_df, subset_value, model, metric):
-    df = results_df[
-    (results_df["subset"] == subset_value) &
-    (results_df["model"] == model) &
-    (~results_df["downsample"])
-    ].copy()
+def process_df(results_df, subset_value, model, metric, downsample=False):
+    if downsample == False:
+        df = results_df[
+        (results_df["subset"] == subset_value) &
+        (results_df["model"] == model) &
+        (results_df["downsample"]==downsample)
+        ].copy()
+    else:
+        df1 = results_df[
+        (results_df["subset"] == subset_value) &
+        (results_df["model"] == model) &
+        (results_df["downsample"]==downsample)
+        ]
+        df2 = results_df[
+        (results_df["subset"] == subset_value) &
+        (results_df["model"] == model) &
+        (results_df["category"]== [item for item in ["other", "same", "all"] if item not in set(df1['category'])][0])
+        ]
+        df2 = pd.concat([df2] * df1['seed_id'].unique().__len__(), ignore_index=True)
+        df = pd.concat([df1, df2], ignore_index=True)
+
     base_cats = ["other", "same", "all"]
 
     # base summary
     summary = (
         df.groupby("category", observed=False)[metric]
-        .agg(mean="mean", std="std")
+        .agg(mean="mean", std=lambda x: x.std(ddof=0))
         .reindex(base_cats)
         .reset_index()
     )
@@ -358,7 +373,72 @@ def soak_plot_matrix(results_df, models, subset_values, metric='rmse', subplot_s
                 ax.yaxis.set_label_position("right")
                 ax.set_ylabel(f"model: {model}", fontsize=12, rotation=270, labelpad=15)
 
-    fig.supxlabel(f"{metric.upper()} (mean ± 2sd) over 5 folds", fontsize=13)
+    fig.supxlabel(f"{metric.upper()} (mean ± 2sd) over {set(results_df['fold_id']).__len__()} folds", fontsize=13)
     fig.tight_layout(h_pad=0.2, w_pad=0.2)
+    plt.close(fig)
+    return fig
+
+
+def soak_plot_matrix_downsample(results_df, models, subset_values, metric='rmse', subplot_size=(5, 4), extend=(0.01, 0.01)):   
+    n_random_seeds = len(set(results_df['seed_id']))-1
+    n_folds = set(results_df['fold_id']).__len__()
+
+    sizes = subplot_size
+    category_order = ["all", "all-same", "same", "other-same", "other"]
+    y_pos = {cat: i for i, cat in enumerate(category_order)}
+
+    fig, axes = plt.subplots(
+        nrows= 2*len(models),
+        ncols=len(subset_values),
+        figsize=(sizes[0]*len(subset_values), sizes[1]*len(models)),
+        sharex='col',
+        sharey=True
+    )
+    for row_idx, model in enumerate(models * 2):
+        for col_idx, subset_value in enumerate(subset_values):
+            ax = axes[row_idx, col_idx]
+            if row_idx < len(models):
+                summary = process_df(results_df, subset_value, model, metric, False)
+            else:
+                summary = process_df(results_df, subset_value, model, metric, True)
+            for i, row in summary.iterrows():
+                y = y_pos[row["category"]]
+                mean = row["mean"]
+                sd = row["std"]
+                if row_idx < len(models):
+                    color = "black" if row['category'] in ["other", "same", "all"] else "grey"
+                else:
+                    color = "red" if row['category'] in ["other", "same", "all"] else "pink"
+                text = (f"{mean:.4f} ± {2*sd:.4f}" if row['category'] in ["other", "same", "all"] else "P < 0.0001" if row['p_value'] < 0.0001 else f"P = {row['p_value']:.4f}")
+                marker_size = 4.5 if row['category'] in ["other", "same", "all"] else 0
+                _sd = 2*sd if row['category'] in ["other", "same", "all"] else sd
+                ax.errorbar(mean, y, xerr=_sd, fmt="o", color=color, markersize=marker_size, linewidth=3)
+                ax.text(mean, y + 0.12, text, ha="center", va="bottom", fontsize=10)
+                left, right = ax.get_xlim()
+                ax.set_xlim(left - extend[0], right + extend[1])
+
+            # --- LEFT: category labels on every subplot ---
+            ax.set_yticks([y_pos[c] for c in category_order])
+            ax.set_yticklabels(category_order, fontsize=12)
+            ax.set_ylim(-0.5, len(category_order) - 0.2)
+
+            ax.grid(alpha=0.5)
+            ax.xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+            ax.tick_params(axis="x", labelsize=12)
+
+            # --- TOP: subset titles ---
+            if row_idx == 0:
+                ax.set_title(f"{subset_value} ({results_df[results_df['subset']==subset_value].iloc[0]['test_size']*len(set(results_df['fold_id']))} rows)", fontsize=12)
+
+            # --- RIGHT: model labels ---
+            if col_idx == len(subset_values) - 1:
+                ax.yaxis.set_label_position("right")
+                ax.set_ylabel(f"{model}", fontsize=12, rotation=270, labelpad=15)
+
+    fig.supxlabel(f"{metric.upper()} (mean ± 2sd) over {n_folds} folds using {n_random_seeds} random seeds for downsample", fontsize=13)
+    fig.tight_layout(h_pad=0.2, w_pad=0.2)
+    plt.plot([], [], 'o', color='black', label='full')
+    plt.plot([], [], 'o', color='red',   label='downsample')
+    plt.legend()
     plt.close(fig)
     return fig
