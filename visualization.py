@@ -692,3 +692,251 @@ def soak_plot_one_model_extend_downsample_2(results_df, subset_value, model, met
     fig.tight_layout()
     plt.close(fig)
     return fig
+
+
+def soak_plot_one_model_extend_downsample_3(results_df, subset_value, model, metric="rmse", figsize=(6, 2.5)):
+    df = results_df[
+        (results_df["subset"] == subset_value) &
+        (results_df["model"] == model)
+    ].copy()
+    df["category"] = (
+        df["category"]
+        + "."
+        + df["downsample"].map({False: "full", True: "ds"})
+    )
+    cats = set(df["category"].unique())
+    
+    sorted_cats = [
+        "other.ds" if "other.ds" in cats else "other.full",
+        "same.ds" if "same.ds" in cats else "other.full",
+        "same.full",
+        "all.full",
+        "all.ds",
+    ]
+
+    # keep only existing categories (safety)
+    sorted_cats = [c for c in sorted_cats if c in cats]
+
+    # base summary
+    summary = (
+        df.groupby("category", observed=False)
+        .agg(
+            mean=(metric, "mean"),
+            std=(metric, "std"),
+            train_size=("train_size", "min"),
+        )
+        .reindex(sorted_cats)
+        .reset_index())
+
+    # calculate p-values for combined categories
+    def pval(cat1, cat2):
+        x = df.loc[df["category"] == cat1, metric]
+        y = df.loc[df["category"] == cat2, metric]
+        t_stat, p = ttest_ind(x, y, equal_var=False)  # Welch's t-test
+        return p
+
+    combined = pd.DataFrame({
+        "category": [f"{sorted_cats[2]}-{sorted_cats[0]}", f"{sorted_cats[1]}-{sorted_cats[0]}", f"{sorted_cats[1]}-{sorted_cats[2]}", f"{sorted_cats[3]}-{sorted_cats[2]}", f"{sorted_cats[3]}-{sorted_cats[4]}", f"{sorted_cats[2]}-{sorted_cats[4]}"],
+        "mean": [
+            (summary.iloc[2]['mean'] + summary.iloc[0]['mean']) / 2,
+            (summary.iloc[1]['mean'] + summary.iloc[0]['mean']) / 2,
+            (summary.iloc[1]['mean'] + summary.iloc[2]['mean']) / 2,
+            (summary.iloc[3]['mean'] + summary.iloc[2]['mean']) / 2,
+            (summary.iloc[3]['mean'] + summary.iloc[4]['mean']) / 2,
+            (summary.iloc[2]['mean'] + summary.iloc[4]['mean']) / 2
+        ],
+        "std": [
+            abs(summary.iloc[2]['mean'] - summary.iloc[0]['mean']) / 2,
+            abs(summary.iloc[1]['mean'] - summary.iloc[0]['mean']) / 2,
+            abs(summary.iloc[1]['mean'] - summary.iloc[2]['mean']) / 2,
+            abs(summary.iloc[3]['mean'] - summary.iloc[2]['mean']) / 2,
+            abs(summary.iloc[3]['mean'] - summary.iloc[4]['mean']) / 2,
+            abs(summary.iloc[2]['mean'] - summary.iloc[4]['mean']) / 2,
+        ],
+        "p_value": [
+            pval(sorted_cats[2], sorted_cats[0]),
+            pval(sorted_cats[1], sorted_cats[0]),
+            pval(sorted_cats[1], sorted_cats[2]),
+            pval(sorted_cats[3], sorted_cats[2]),
+            pval(sorted_cats[3], sorted_cats[4]),
+            pval(sorted_cats[2], sorted_cats[4])
+        ]
+    })
+
+    n = len(sorted_cats) + len(combined['category'].to_list())
+    category_order = [None] * n
+
+    category_order[::2] = combined['category'].to_list()
+    category_order[1::2] = sorted_cats
+
+    combined["train_size"] = np.nan
+    summary["p_value"] = np.nan
+    final_df = pd.concat([summary, combined], ignore_index=True)
+    final_df = (
+        final_df.assign(category=lambda x: pd.Categorical(x["category"], category_order, ordered=True))
+        .sort_values("category")
+        .reset_index(drop=True)
+    )
+
+    final_df["category"] = final_df.apply(
+        lambda row: f"{row['category']}.{int(row['train_size'])}" 
+        if pd.notnull(row['train_size']) 
+        else row['category'], 
+        axis=1
+    )
+
+    # final_df["category"] = final_df["category"].str.replace(r'\.full\.|\.ds\.', '.', regex=True)
+
+    # y positions
+    category_order = final_df["category"]
+    y_pos = {cat: i for i, cat in enumerate(category_order)}
+
+    # plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    for i, row in final_df.iterrows():
+        y = y_pos[row["category"]]
+        mean = row["mean"]
+        sd = row["std"]
+        is_acc_row = "-" not in str(row["category"])
+        color = 'black' if is_acc_row else 'grey'
+        text = f"{mean:.5f} ± {sd:.5f}" if is_acc_row else f"P = {row['p_value']:.4f}"
+        marker_size = 4 if is_acc_row else 0
+        ax.errorbar(mean, y, xerr=sd, fmt="o", color=color, markersize=marker_size)
+        ax.text(mean, y + 0.15, text, ha="center", va="bottom", fontsize=8)
+
+    # y-axis formatting
+    ax.set_yticks([y_pos[c] for c in category_order])
+    ax.set_yticklabels(category_order, fontsize=9)
+    ax.set_ylim(-0.5, len(category_order) - 0.2)
+
+    # labels & title
+    ax.set_xlabel(f"{metric.upper()} (mean ± 2sd)", fontsize=8)
+    ax.set_title(f"subset: {subset_value} | model: {model} | {df['fold_id'].nunique()} folds", fontsize=9)
+    ax.grid(alpha=0.5)
+    ax.xaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+    ax.tick_params(axis='x', labelsize=9)
+    fig.tight_layout()
+    plt.close(fig)
+    return fig
+
+
+def soak_plot_one_model_extend_downsample_4(results_df, subset_value, model, metric="rmse", figsize=(6, 2.5)):
+    df = results_df[
+        (results_df["subset"] == subset_value) &
+        (results_df["model"] == model)
+    ].copy()
+    df["category"] = (
+        df["category"]
+        + "."
+        + df["downsample"].map({False: "full", True: "ds"})
+    )
+    cats = set(df["category"].unique())
+    
+    if "same.ds" in cats:
+        sorted_cats = ["other.full","same.full",  "same.ds",   "all.ds",   "all.full"]
+    else:
+        sorted_cats = ["other.ds",  "other.full", "same.full", "all.full", "all.ds"]
+
+    # base summary
+    summary = (
+        df.groupby("category", observed=False)
+        .agg(
+            mean=(metric, "mean"),
+            std=(metric, "std"),
+            train_size=("train_size", "min"),
+        )
+        .reindex(sorted_cats)
+        .reset_index())
+
+    # calculate p-values for combined categories
+    def pval(cat1, cat2):
+        x = df.loc[df["category"] == cat1, metric]
+        y = df.loc[df["category"] == cat2, metric]
+        t_stat, p = ttest_ind(x, y, equal_var=False)  # Welch's t-test
+        return p
+
+    combined = pd.DataFrame({
+        "category": [f"{sorted_cats[2]}-{sorted_cats[0]}", f"{sorted_cats[1]}-{sorted_cats[0]}", f"{sorted_cats[1]}-{sorted_cats[2]}", f"{sorted_cats[3]}-{sorted_cats[2]}", f"{sorted_cats[3]}-{sorted_cats[4]}", f"{sorted_cats[2]}-{sorted_cats[4]}"],
+        "mean": [
+            (summary.iloc[2]['mean'] + summary.iloc[0]['mean']) / 2,
+            (summary.iloc[1]['mean'] + summary.iloc[0]['mean']) / 2,
+            (summary.iloc[1]['mean'] + summary.iloc[2]['mean']) / 2,
+            (summary.iloc[3]['mean'] + summary.iloc[2]['mean']) / 2,
+            (summary.iloc[3]['mean'] + summary.iloc[4]['mean']) / 2,
+            (summary.iloc[2]['mean'] + summary.iloc[4]['mean']) / 2
+        ],
+        "std": [
+            abs(summary.iloc[2]['mean'] - summary.iloc[0]['mean']) / 2,
+            abs(summary.iloc[1]['mean'] - summary.iloc[0]['mean']) / 2,
+            abs(summary.iloc[1]['mean'] - summary.iloc[2]['mean']) / 2,
+            abs(summary.iloc[3]['mean'] - summary.iloc[2]['mean']) / 2,
+            abs(summary.iloc[3]['mean'] - summary.iloc[4]['mean']) / 2,
+            abs(summary.iloc[2]['mean'] - summary.iloc[4]['mean']) / 2,
+        ],
+        "p_value": [
+            pval(sorted_cats[2], sorted_cats[0]),
+            pval(sorted_cats[1], sorted_cats[0]),
+            pval(sorted_cats[1], sorted_cats[2]),
+            pval(sorted_cats[3], sorted_cats[2]),
+            pval(sorted_cats[3], sorted_cats[4]),
+            pval(sorted_cats[2], sorted_cats[4])
+        ]
+    })
+
+    n = len(sorted_cats) + len(combined['category'].to_list())
+    category_order = [None] * n
+
+    category_order[::2] = combined['category'].to_list()
+    category_order[1::2] = sorted_cats
+
+    combined["train_size"] = np.nan
+    summary["p_value"] = np.nan
+    final_df = pd.concat([summary, combined], ignore_index=True)
+    final_df = (
+        final_df.assign(category=lambda x: pd.Categorical(x["category"], category_order, ordered=True))
+        .sort_values("category")
+        .reset_index(drop=True)
+    )
+
+    final_df["category"] = final_df.apply(
+        lambda row: f"{row['category']}.{int(row['train_size'])}" 
+        if pd.notnull(row['train_size']) 
+        else row['category'], 
+        axis=1
+    )
+
+    # final_df["category"] = final_df["category"].str.replace(r'\.full\.|\.ds\.', '.', regex=True)
+
+    # y positions
+    category_order = final_df["category"]
+    y_pos = {cat: i for i, cat in enumerate(category_order)}
+
+    # plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    for i, row in final_df.iterrows():
+        y = y_pos[row["category"]]
+        mean = row["mean"]
+        sd = row["std"]
+        is_acc_row = "-" not in str(row["category"])
+        color = 'black' if is_acc_row else 'grey'
+        text = f"{mean:.5f} ± {sd:.5f}" if is_acc_row else f"P = {row['p_value']:.4f}"
+        marker_size = 4 if is_acc_row else 0
+        ax.errorbar(mean, y, xerr=sd, fmt="o", color=color, markersize=marker_size)
+        ax.text(mean, y + 0.15, text, ha="center", va="bottom", fontsize=8)
+
+    # y-axis formatting
+    ax.set_yticks([y_pos[c] for c in category_order])
+    ax.set_yticklabels(category_order, fontsize=9)
+    ax.set_ylim(-0.5, len(category_order) - 0.2)
+
+    # labels & title
+    ax.set_xlabel(f"{metric.upper()} (mean ± 2sd)", fontsize=8)
+    ax.set_title(f"subset: {subset_value} | model: {model} | {df['fold_id'].nunique()} folds", fontsize=9)
+    ax.grid(alpha=0.5)
+    ax.xaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+    ax.tick_params(axis='x', labelsize=9)
+    fig.tight_layout()
+    plt.close(fig)
+    return fig
