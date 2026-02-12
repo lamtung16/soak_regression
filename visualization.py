@@ -1015,7 +1015,11 @@ def soak_plot_one_model_downsample_split(results_df, subset_value, model, metric
             else row['category'], 
             axis=1
         )
+        final['category'] = final['category'].str.replace('.full', '', regex=False)
+        final['category'] = final['category'].str.replace('.ds', '', regex=False)
         dfs[i] = final
+
+    dfs[1]['category'] = dfs[1]['category'].str.split('.').str[0]
 
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     for idx, ax in enumerate(axes):
@@ -1038,7 +1042,7 @@ def soak_plot_one_model_downsample_split(results_df, subset_value, model, metric
         ax.set_ylim(-0.5, len(category_order) - 0.2)
 
         # labels & title
-        ax.set_title("full" if idx==0 else "downsample", fontsize=10)
+        ax.set_title("sample size: " + ("full" if idx==0 else f"{int(dfs[1]['train_size'].max())}"), fontsize=10)
         ax.grid(alpha=0.5)
         ax.xaxis.set_major_formatter(FormatStrFormatter("%.3f"))
         ax.tick_params(axis='x', labelsize=9)
