@@ -1031,7 +1031,7 @@ def soak_plot_one_model_downsample_split(results_df, subset_value, model, metric
             mean = row["mean"]
             sd = row["std"]
             color = 'black' if i % 2 == 0 else 'grey'
-            text = f"{mean:.5f} ± {sd:.5f}" if i % 2 == 0 else f"P = {row['p_value']:.4f}"
+            text = f"{mean:.5f} ± {sd:.5f}" if i % 2 == 0 else f"P = {row['p_value']:.4f}" if row['p_value'] > 0.0001 else "P < 0.0001"
             marker_size = 4 if i % 2 == 0 else 0
             ax.errorbar(mean, y, xerr=sd, fmt="o", color=color, markersize=marker_size)
             ax.text(mean, y + 0.15, text, ha="center", va="bottom", fontsize=8)
@@ -1047,7 +1047,7 @@ def soak_plot_one_model_downsample_split(results_df, subset_value, model, metric
         ax.xaxis.set_major_formatter(FormatStrFormatter("%.3f"))
         ax.tick_params(axis='x', labelsize=9)
 
-    fig.supxlabel(f"{metric.upper()} (mean ± 2sd) | subset: {subset_value} | model: {model} | {set(results_df['fold_id']).__len__()} test folds | {len(set(results_df['seed_id']))-1} random seeds for downsample", fontsize=11)
+    fig.supxlabel(f"{metric.upper()} (mean ± 2sd) | test subset: {subset_value} | model: {model} | {set(results_df['fold_id']).__len__()} test folds | {len(set(results_df['seed_id']))-1} random seeds for downsample", fontsize=11)
     fig.tight_layout()
     plt.close(fig)
     return fig

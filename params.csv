@@ -21,3 +21,6 @@ qsip_pc2_all,time,growth_per_day,True
 qsip_pc2_all,replicate,growth_per_day,True
 qsip_pc2_all,treatment,growth_per_day,True
 qsip_pc2_all,site,growth_per_day,True
+simulation1,subset,y,False
+simulation2,subset,y,False
+simulation3,subset,y,False
