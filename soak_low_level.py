@@ -59,42 +59,24 @@ class SOAKFold:
     def __init__(self, n_splits=5, seed=123):
         self.n_splits = n_splits
         self.seed = seed
-
-    def split(self, X, y, subset_vec):
-        splits = []
-        for subset_value in np.unique(subset_vec):
-            same_idx = np.where(subset_vec == subset_value)[0]
-            other_idx = np.where(subset_vec != subset_value)[0]
-            kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
-            for fold_id, (train_idx, test_idx) in enumerate(kf.split(same_idx)):
-                X_train_same, y_train_same = X[same_idx[train_idx]], y[same_idx[train_idx]]
-                X_train_other, y_train_other = X[other_idx], y[other_idx]
-                for category, (X_train, y_train) in {
-                    'same': (X_train_same, y_train_same),
-                    'other': (X_train_other, y_train_other),
-                    'all': (np.vstack([X_train_same, X_train_other]), np.concatenate([y_train_same, y_train_other]))
-                }.items():
-                    splits.append([subset_value, category, fold_id + 1, X_train, y_train, X[same_idx[test_idx]], y[same_idx[test_idx]]])
-        return splits
     
-
     def split_idx(self, subset_vec):
         splits = []
-        for subset_value in np.unique(subset_vec):
-            same_idx = np.where(subset_vec == subset_value)[0]
-            other_idx = np.where(subset_vec != subset_value)[0]
-            kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
-            for fold_id, (train_idx, test_idx) in enumerate(kf.split(same_idx)):
-                train_same_idx = same_idx[train_idx]
-                test_same_idx = same_idx[test_idx]
-                for category, train_idx_final in {
-                    'same': train_same_idx,
-                    'other': other_idx,
-                    'all': np.concatenate([train_same_idx, other_idx])
-                }.items():
-                    splits.append([subset_value, category, fold_id + 1, train_idx_final, test_same_idx])
+        n = len(subset_vec)
+        kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
+        all_idx = np.arange(n)
+        for fold_id, (fold_train_idx, fold_test_idx) in enumerate(kf.split(range(n))):
+            for test_subset in np.unique(subset_vec):
+                test_subset_idx = np.where(subset_vec == test_subset)[0]
+                test_idx = np.intersect1d(test_subset_idx, fold_test_idx)
+                train_idx_dict = {
+                    "same":  np.intersect1d(fold_train_idx, test_subset_idx),
+                    "other": np.intersect1d(fold_train_idx, np.setdiff1d(all_idx, test_subset_idx)),
+                    "all":   np.intersect1d(fold_train_idx, all_idx)
+                }
+                for category, train_idx in train_idx_dict.items():
+                    splits.append([test_subset, category, fold_id + 1, train_idx, test_idx])
         return splits
-
 
     @staticmethod
     def model_eval(X_train, y_train, X_test, y_test, model='featureless'):

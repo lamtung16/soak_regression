@@ -374,7 +374,7 @@ def soak_plot_matrix(results_df, models, subset_values, metric='rmse', subplot_s
                 ax.set_ylabel(f"model: {model}", fontsize=12, rotation=270, labelpad=15)
 
     fig.supxlabel(f"{metric.upper()} (mean ± 2sd) over {set(results_df['fold_id']).__len__()} folds", fontsize=13)
-    fig.tight_layout(h_pad=0.2, w_pad=0.2)
+    # fig.tight_layout(h_pad=0.2, w_pad=0.2)
     plt.close(fig)
     return fig
 
