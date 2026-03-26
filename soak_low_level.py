@@ -70,12 +70,12 @@ class SOAKFold:
                 test_subset_idx = np.where(subset_vec == test_subset)[0]
                 test_idx = np.intersect1d(test_subset_idx, fold_test_idx)
                 train_idx_dict = {
-                    "same":  np.intersect1d(fold_train_idx, test_subset_idx),
-                    "other": np.intersect1d(fold_train_idx, np.setdiff1d(all_idx, test_subset_idx)),
-                    "all":   np.intersect1d(fold_train_idx, all_idx)
+                    "same":  test_subset_idx,
+                    "other": np.setdiff1d(all_idx, test_subset_idx),
+                    "all":   all_idx,
                 }
                 for category, train_idx in train_idx_dict.items():
-                    splits.append([test_subset, category, fold_id + 1, train_idx, test_idx])
+                    splits.append((test_subset, category, fold_id + 1, np.intersect1d(fold_train_idx, train_idx), test_idx))
         return splits
 
     @staticmethod
