@@ -1,205 +1,302 @@
 import numpy as np
-import polars as pl
+import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-import matplotlib.cm as cm
-from sklearn.preprocessing import StandardScaler, PolynomialFeatures
-from sklearn.linear_model import RidgeCV, LinearRegression
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from sklearn.model_selection import KFold
+from matplotlib.ticker import FormatStrFormatter
+from sklearn.model_selection import StratifiedKFold
+from sklearn.linear_model import RidgeCV
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GridSearchCV
+from sklearn.tree import DecisionTreeRegressor
+from scipy.stats import ttest_ind
+
+def split(subset_vec, n_splits=5, n_random_seeds=5, seed=123):
+    """
+    Perform SOAK splitting.
+
+    Parameters
+    ----------
+    subset_vec : array-like
+        Vector indicating subset/group membership.
+    n_splits : int, default=5
+        Number of folds.
+    n_random_seeds: int, default=5
+        Number of random seeds for downsampling
+    seed : int, default=123
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    list
+        List of [test_subset, category, fold_id, random_seed, train_idx, test_idx]
+    """
+    
+    subset_vec = np.asarray(subset_vec)
+
+    if subset_vec.ndim != 1:
+        raise ValueError("subset_vec must be a 1D array-like")
+
+    n = subset_vec.shape[0]
+
+    if n_splits < 2:
+        raise ValueError("n_splits must be at least 2")
+
+    if n_splits > n:
+        raise ValueError("n_splits cannot exceed number of samples")
+    
+    splits = []
+    kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    all_idx = np.arange(n)
+    for fold_id, (fold_train_idx, fold_test_idx) in enumerate(kf.split(range(n), subset_vec)):
+        for test_subset in np.unique(subset_vec):
+            test_subset_idx = np.where(subset_vec == test_subset)[0]
+            test_idx = np.intersect1d(test_subset_idx, fold_test_idx)
+            other_subset_idx = np.setdiff1d(all_idx, test_subset_idx)
+            
+            bigger_set = ""
+            downsample_size = int(min(len(test_subset_idx), len(other_subset_idx))*(n_splits-1)/n_splits)
+            downsample_subset_idx = []
+            if abs(len(test_subset_idx) - len(other_subset_idx)) >= n_splits:
+                bigger_set = "same" if len(test_subset_idx) > len(other_subset_idx) else "other"
+                downsample_subset_idx = max(test_subset_idx, other_subset_idx, key=len)
+
+            train_idx_dict = {
+                "same":              test_subset_idx,
+                "other":             other_subset_idx,
+                f"{bigger_set}-ds":  downsample_subset_idx,
+                "all":               all_idx,
+                "all-ds":            all_idx,
+            }
+
+            for category, train_idx in train_idx_dict.items():
+                if len(train_idx) > 0:
+                    if "ds" in category:
+                        for random_seed in range(n_random_seeds):
+                            splits.append((test_subset, category, fold_id + 1, random_seed + 1, sorted(np.random.choice(np.intersect1d(fold_train_idx, train_idx), size=downsample_size, replace=False)), test_idx))
+                    else:
+                        splits.append((test_subset, category, fold_id + 1, 0, np.intersect1d(fold_train_idx, train_idx), test_idx))
+                    
+    return splits
+
+
+
+def evaluate(y_pred, y_test):
+    rmse = np.sqrt(np.mean((y_test - y_pred) ** 2))
+    mae = np.median(np.abs(y_test - y_pred))
+    return rmse, mae
+
+
+def featureless_model(X_train, y_train, X_test, y_test):
+    mean_target = np.mean(y_train)
+    y_pred = np.full_like(y_test, mean_target)
+    return evaluate(y_pred, y_test)
+
+
+def linear_model(X_train, y_train, X_test, y_test):
+    model = Pipeline([
+        ('scaler', StandardScaler()),
+        ('ridge', RidgeCV(alphas=np.logspace(-2, 2, 20), cv=4))
+    ])
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    return evaluate(y_pred, y_test)
+
+
+def treeCV_model(X_train, y_train, X_test, y_test):
+    param_grid = {'max_depth': np.arange(2, 41, 2)}
+    grid_search = GridSearchCV(DecisionTreeRegressor(), param_grid, cv=4, scoring='neg_mean_squared_error', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    y_pred = grid_search.best_estimator_.predict(X_test)
+    return evaluate(y_pred, y_test)
+
+
+all_models = {
+    "featureless": featureless_model,
+    "linear": linear_model,
+    "tree": treeCV_model
+}
 
 class SOAK:
-    # --- init ---
-    def __init__(self, n_splits=5, seed=123):
-        self.n_splits = n_splits
-        self.seed = seed
-        self.all_models = {
-            "featureless": self._featureless_model,
-            "linear": self._linear_model,
-            "linear_BasExp": self._linear_BasExp_model,
-        }
+    def __init__(self, df, subset_col, target_col):
+        """
+        SOAK class.
 
-    # --- Model methods ---
-    def _featureless_model(self, train_idx, test_idx):
-        y = self.df.select(self.target_col).to_numpy().flatten()
-        y_pred = np.repeat(y[train_idx].mean(), len(test_idx))
-        mse = mean_squared_error(y[test_idx], y_pred)
-        mae = mean_absolute_error(y[test_idx], y_pred)
-        return mse, mae
+        Parameters
+        ----------
+        df : pandas dataframe
+            Tabular dataset
+        subset_col: str
+            Name of subset column for SOAK spliting
+        target_col: str
+            Name of target column
 
-    def _linear_model(self, train_idx, test_idx):
-        model = LinearRegression().fit(self.df.select(self.feature_cols).to_numpy()[train_idx], 
-                                       self.df.select(self.target_col).to_numpy().flatten()[train_idx])
-        y_pred = model.predict(self.df.select(self.feature_cols).to_numpy()[test_idx])
-        mse = mean_squared_error(self.df.select(self.target_col).to_numpy().flatten()[test_idx], y_pred)
-        mae = mean_absolute_error(self.df.select(self.target_col).to_numpy().flatten()[test_idx], y_pred)
-        return mse, mae
-
-    def _linear_BasExp_model(self, train_idx, test_idx):
-        pipeline = Pipeline([
-            ('poly', PolynomialFeatures()),
-            ('scaler', StandardScaler()),
-            ('ridge', RidgeCV(alphas=np.logspace(-2, 2, 10), cv=4))
-        ])
-        pipeline.fit(self.df.select(self.feature_cols).to_numpy()[train_idx], 
-                     self.df.select(self.target_col).to_numpy().flatten()[train_idx])
-        y_pred = pipeline.predict(self.df.select(self.feature_cols).to_numpy()[test_idx])
-        mse = mean_squared_error(self.df.select(self.target_col).to_numpy().flatten()[test_idx], y_pred)
-        mae = mean_absolute_error(self.df.select(self.target_col).to_numpy().flatten()[test_idx], y_pred)
-        return mse, mae
-    
-    
-    # --- down sample if chosen ---
-    def _downsample_subsets(self, seed):
-        min_size = self.df.group_by(self.subset_col).count().select("count").min().item()
-        downsampled_parts = []
-        for _, group_df in self.df.group_by(self.subset_col):
-            sampled = group_df.sample(n=min_size, shuffle=True, seed=seed)
-            downsampled_parts.append(sampled)
-        return pl.concat(downsampled_parts)
-
-
-    # --- subset analysis ---
-    def subset_analyze(self, df, subset_col, target_col, subset_values=None, n_folds=5, models=None, downsample_majority=False, seed=123):
-
+        """
         self.df = df
-        self.feature_cols = [c for c in df.columns if c.startswith("X_")]
         self.subset_col = subset_col
         self.target_col = target_col
+        self.results_df = None
+    
+    def analyze(self, model_list = ["tree"], n_splits=10, n_random_seeds=10, log_target=False, seed=123):
+        """
+        SOAK analyze.
 
-        feature_scaler = StandardScaler()
-        scaled_features = feature_scaler.fit_transform(self.df.select(self.feature_cols).to_numpy())
-        for i, col in enumerate(self.feature_cols):
-            self.df = self.df.with_columns(pl.Series(col, scaled_features[:, i]))
+        Parameters
+        ----------
+        model_list : list, default = ["featureless", "tree"]
+            List of train models, subset of ["featureless", "linear", "tree"]
+        n_splits : int, default=10
+            Number of folds for each subset.
+        n_random_seeds: int, default=10
+            Number of random seeds for downsampling
+        log_target: boolean, default=False
+            Transform target using log or not
+        seed : int, default=123
+            Random seed for reproducibility.
 
-        if models is None:
-            models = list(self.all_models.keys())
-        self.model_dict = {name: self.all_models[name] for name in models if name in self.all_models}
+        """
+        X = np.array(self.df.drop(columns=[self.subset_col, self.target_col]).select_dtypes(include=[np.number]))
+        y = self.df[self.target_col]
+        if log_target:
+            y = np.log(y)
+        y = (y - np.mean(y)) / np.std(y)
+        subset_vec = self.df[self.subset_col]
+        results = []
+        for test_subset, category, fold_id, random_seed, train_idx, test_idx in split(subset_vec, n_splits, n_random_seeds, seed):
+            for model in model_list:
+                rmse, mae = self.model_eval(X[train_idx], y[train_idx], X[test_idx], y[test_idx], model)
+                results.append({
+                                "subset": test_subset,
+                                "category": category,
+                                "fold_id": fold_id,
+                                "model": model,
+                                "seed_id": random_seed,
+                                "train_size": len(train_idx),
+                                "test_size": len(test_idx),
+                                "rmse": rmse,
+                                "mae": mae,
+                            })
+        self.results_df = pd.DataFrame(results)
 
-        if downsample_majority:
-            self.df = self._downsample_subsets(seed)
+    @staticmethod
+    def model_eval(X_train, y_train, X_test, y_test, model):
+        return all_models[model](X_train, y_train, X_test, y_test)
 
-        if subset_values is None:
-            subset_values = (self.df.select(self.subset_col).unique().to_series().to_list())
 
-        rows = []
-        for subset_val in subset_values:
-            subset_idx = np.where(self.df.select(self.subset_col).to_numpy().flatten() == subset_val)[0]
-            other_idx  = np.where(self.df.select(self.subset_col).to_numpy().flatten() != subset_val)[0]
-            kf = KFold(n_splits=n_folds)
+    def visualize(self, subset_value=None, model=None, metric="rmse", figsize=(15, 3)):
+        """
+        SOAK visualize.
 
-            for fold, (train_idx, test_idx) in enumerate(kf.split(subset_idx)):
-                test_indices = subset_idx[test_idx]
-                same_indices = subset_idx[train_idx]
-                all_indices = np.concatenate([same_indices, other_idx])
+        Parameters
+        ----------
+        subset_value : str, default is the last seen subset value
+            Value of test subset
+        model : str, default is the last seen training model
+            Trained model
+        metric: str, default='rmse'
+            Metric, it can be either 'rmse' or 'mae'
+        figsize: tuple, default=(15, 3)
+            Size of figure
 
-                train_sets = {
-                    "all": all_indices,
-                    "same": same_indices,
-                    "other": other_idx,
-                }
+        """
+        if subset_value == None:
+            subset_value = np.unique(self.df[self.subset_col])[-1]
+        if model == None:
+            model = np.unique(self.results_df['model'])[-1]
+        
+        def pval(cat1, cat2):
+            x = df.loc[df["category"] == cat1, metric]
+            y = df.loc[df["category"] == cat2, metric]
+            _, p = ttest_ind(x, y, equal_var=False)
+            return p
 
-                for category, train_indices in train_sets.items():
-                    for model_name, model_func in self.model_dict.items():
-                        mse, mae = model_func(train_indices, test_indices)
-                        rows.append({
-                            "subset": subset_val,
-                            "category": category,
-                            "test_fold": fold + 1,
-                            "model": model_name,
-                            "mse": mse,
-                            "mae": mae,
-                        })
+        df = self.results_df[(self.results_df['subset'] == subset_value) &(self.results_df["model"] == model)].copy()
 
-        self.results_df = pl.DataFrame(rows)
+        cats = set(df["category"].unique())
+        sorted_cats_full = ["other", "same", "all"]
+        sorted_cats_ds = ["other", "same", "all-ds"]
+        if "same-ds" in cats:
+            sorted_cats_ds = ["other", "same-ds", "all-ds"]
+        if "other-ds" in cats:
+            sorted_cats_ds = ["other-ds", "same", "all-ds"]
+        
+        dfs = [None, None]
+        for i, sorted_cats in enumerate([sorted_cats_full, sorted_cats_ds]):   
+            summary = (
+                df.groupby("category", observed=False)
+                .agg(
+                    mean=(metric, "mean"),
+                    std=(metric, "std"),
+                    train_size=("train_size", "min"),
+                )
+                .reindex(sorted_cats)
+                .reset_index())
 
-    def plot_results(self):
-        if self.results_df is None:
-            raise ValueError("No results found. Run analyze() first.")
+            combined = pd.DataFrame({
+                "category": [f"{sorted_cats[0]}-{sorted_cats[1]}", f"{sorted_cats[2]}-{sorted_cats[1]}"],
+                "mean": [
+                    (summary.iloc[0]['mean'] + summary.iloc[1]['mean']) / 2,
+                    (summary.iloc[2]['mean'] + summary.iloc[1]['mean']) / 2
+                ],
+                "std": [
+                    abs(summary.iloc[0]['mean'] - summary.iloc[1]['mean']) / 2,
+                    abs(summary.iloc[2]['mean'] - summary.iloc[1]['mean']) / 2
+                ],
+                "p_value": [
+                    pval(sorted_cats[0], sorted_cats[1]),
+                    pval(sorted_cats[2], sorted_cats[1]),
+                ]
+            })
 
-        # Compute log metrics
-        df = self.results_df.with_columns([
-            pl.col("mse").log10().alias("log_mse"),
-            pl.col("mae").log10().alias("log_mae")
-        ]).sort("model")
+            n = len(sorted_cats) + len(combined['category'].to_list())
+            category_order = [None] * n
+            category_order[::2] = sorted_cats
+            category_order[1::2] = combined['category'].to_list()
 
-        subsets = df['subset'].unique()
-        categories = ['all', 'same', 'other']
-        models = sorted(df['model'].unique())
+            combined["train_size"] = np.nan
+            summary["p_value"] = np.nan
 
-        # Aggregate mean and std
-        df_mean = (
-            df.group_by(['subset', 'category', 'model'], maintain_order=True)
-            .agg([
-                pl.col("log_mse").mean().alias("mse_mean"),
-                pl.col("log_mse").std().alias("mse_sd"),
-                pl.col("log_mae").mean().alias("mae_mean"),
-                pl.col("log_mae").std().alias("mae_sd")
-            ])
-        )
+            final = pd.concat([summary, combined], ignore_index=True)
+            final = (
+                final.assign(category=lambda x: pd.Categorical(x["category"], category_order, ordered=True))
+                .sort_values("category")
+                .reset_index(drop=True)
+            )
+            final["category"] = final.apply(
+                lambda row: f"{row['category']}.{int(row['train_size'])}" 
+                if pd.notnull(row['train_size']) 
+                else row['category'], 
+                axis=1
+            )
+            final['category'] = final['category'].str.replace('-ds', '', regex=False)
+            dfs[i] = final
 
-        # Assign colors
-        cmap = cm.get_cmap('tab10')
-        model_colors = {model: cmap(i % 10) for i, model in enumerate(models)}
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
+        for idx, ax in enumerate(axes):
+            df = dfs[idx]
+            category_order = df['category'].unique().tolist()
+            y_pos = {cat: i for i, cat in enumerate(category_order)}
+            for i, row in df.iterrows():
+                y = y_pos[row["category"]]
+                mean = row["mean"]
+                sd = row["std"]
+                color = 'black' if i % 2 == 0 else 'grey'
+                text = f"{mean:.5f} ± {sd:.5f}" if i % 2 == 0 else f"P = {row['p_value']:.4f}" if row['p_value'] > 0.0001 else "P < 0.0001"
+                marker_size = 4 if i % 2 == 0 else 0
+                ax.errorbar(mean, y, xerr=sd, fmt="o", color=color, markersize=marker_size)
+                ax.text(mean, y + 0.15, text, ha="center", va="bottom", fontsize=8)
 
-        fig_dict = {}
+            # y-axis formatting
+            ax.set_yticks([y_pos[c] for c in category_order])
+            ax.set_yticklabels(category_order, fontsize=9)
+            ax.set_ylim(-0.5, len(category_order) - 0.2)
 
-        for subset in subsets:
-            df_subset = df.filter(pl.col("subset") == subset)
-            df_mean_subset = df_mean.filter(pl.col("subset") == subset)
-            n_obs = self.df.filter(pl.col(self.subset_col) == subset).height
+            # labels & title
+            ax.set_title("sample size: " + ("full" if idx==0 else f"{int(dfs[1]['train_size'].max())}"), fontsize=10)
+            ax.grid(alpha=0.5)
+            ax.xaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+            ax.tick_params(axis='x', labelsize=9)
 
-            fig, axes = plt.subplots(len(categories), 4, figsize=(16, 1.1 * len(categories)), sharex=False)
-            axes = np.array([axes]) if len(categories) == 1 else axes
-
-            mse_min = df_mean_subset['mse_mean'].min() - 2 * df_mean_subset['mse_sd'].max()
-            mse_max = df_mean_subset['mse_mean'].max() + 2 * df_mean_subset['mse_sd'].max()
-            mae_min = df_mean_subset['mae_mean'].min() - 2 * df_mean_subset['mae_sd'].max()
-            mae_max = df_mean_subset['mae_mean'].max() + 2 * df_mean_subset['mae_sd'].max()
-
-            for i, category in enumerate(categories):
-                data = df_subset.filter(pl.col("category") == category)
-                data_mean = df_mean_subset.filter(pl.col("category") == category)
-                model_to_y = {m: y for y, m in enumerate(sorted(data['model'].unique()))}
-
-                for j, metric in enumerate(['mse', 'mse', 'mae', 'mae']):
-                    ax = axes[i, j]
-                    ax.grid(alpha=0.1)
-                    ax.set_ylim(-0.5, len(models) - 0.5)
-                    ax.set_yticklabels([])
-
-                    if metric == 'mse':
-                        ax.set_xlim(mse_min, mse_max)
-                    else:
-                        ax.set_xlim(mae_min, mae_max)
-
-                    if j == 0:
-                        ax.set_ylabel(category, rotation=0, labelpad=15, va='center', fontweight='bold')
-                    else:
-                        ax.set_ylabel('')
-
-                    if i == len(categories) - 1:
-                        if j % 2 == 0:
-                            ax.set_xlabel(f'log({metric.upper()})')
-                        else:
-                            ax.set_xlabel(f'log({metric.upper()})')
-
-                    if j % 2 == 0:
-                        for k, row in enumerate(data_mean.to_dicts()):
-                            color = model_colors[row["model"]]
-                            ax.errorbar(row[f"{metric}_mean"], k, xerr=row[f"{metric}_sd"], fmt='o', color=color, capsize=2, markersize=5)
-                    else:
-                        for model in model_to_y:
-                            vals = data.filter(pl.col("model") == model).select(f"log_{metric}").to_numpy().flatten()
-                            ax.scatter(vals, np.ones_like(vals) * model_to_y[model], facecolor=model_colors[model], edgecolor=model_colors[model], s=20)
-
-            # Legend and title
-            handles = [Line2D([], [], marker='o', color=color, markerfacecolor=color,linestyle='', markersize=5, label=m)
-                    for m, color in reversed(list(model_colors.items()))]
-            fig.legend(handles=handles, loc='upper right', fontsize=7)
-            fig.suptitle(f'Subset: {subset} (n={n_obs})', fontsize=11, fontweight='bold')
-            plt.tight_layout()
-            fig_dict[subset] = fig
-
-        return fig_dict
+        fig.supxlabel(f"{metric.upper()} (mean ± 2sd) | test subset: {subset_value} | model: {model} | {set(self.results_df['fold_id']).__len__()} test folds | {len(set(self.results_df['seed_id']))-1} downsample random seeds", fontsize=11)
+        fig.tight_layout()
+        plt.close(fig)
+        return fig
